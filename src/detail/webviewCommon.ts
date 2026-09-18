@@ -46,9 +46,15 @@ export function shellHtml(title: string, body: string, cspSource: string): strin
   button.active { border-color: var(--vscode-focusBorder); color: var(--vscode-focusBorder); }
   .placeholder {
     border: 1px dashed var(--vscode-panel-border); color: var(--vscode-descriptionForeground);
-    padding: 8px 12px; margin: 0.5em 0; cursor: pointer; display: inline-block;
+    padding: 8px 12px; margin: 0.5em 0; display: inline-block;
   }
-  .placeholder:hover { color: var(--vscode-foreground); }
+  .media-toggle {
+    position: fixed; top: 12px; right: 18px; z-index: 10;
+  }
+  .media-slot.filled .placeholder { display: none; }
+  /* Eco-adjusted toggle: body.eco swaps traditional <-> eco-adjusted columns */
+  body:not(.eco) .eco { display: none; }
+  body.eco .trad { display: none; }
   blockquote { border-left: 3px solid var(--vscode-panel-border); margin: 0.6em 0; padding: 2px 14px; color: var(--vscode-descriptionForeground); }
   .comment { margin: 0.5em 0; padding-top: 0.5em; border-top: 1px solid var(--vscode-panel-border); }
   .comment .head { color: var(--vscode-descriptionForeground); font-size: 0.85em; }

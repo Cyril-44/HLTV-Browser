@@ -50,7 +50,7 @@ summary('matchDetail (live)', {
   vetoes: matchDetail.vetoes,
   maps: matchDetail.maps,
   statMaps: matchDetail.statMaps,
-  statTeams: Object.entries(matchDetail.stats).map(([k, v]) => `${k}: ${v.map((t) => `${t.team}(${t.rows.length})`).join(', ')}`),
+  statTeams: Object.entries(matchDetail.stats).map(([k, v]) => `${k}: ${v.map((t) => `${t.team}/${t.side}(${t.rows.length})`).join(', ')}`),
   firstRow: matchDetail.stats['all']?.[0]?.rows?.[0],
   lineups: matchDetail.lineups.map((l) => `${l.team}: ${l.players.length}`),
   scorebot: matchDetail.scorebot,

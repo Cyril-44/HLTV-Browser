@@ -71,21 +71,40 @@ class HltvEngine {
   }
 
   /**
-   * Fetch a URL from an about:blank page context (scorebot serves permissive
-   * CORS). Lives on a small persistent browser separate from page navigation.
+   * Fetch a URL from a page parked on the www.hltv.org origin. Scorebot
+   * (scorebot-lb.hltv.org) shares the .hltv.org cf_clearance cookie, so
+   * requests from this origin look exactly like the real site's own polling.
+   * An about:blank origin gets challenged by Cloudflare.
    */
-  public async contextFetch(url: string, init?: { method?: string; body?: string }): Promise<{ status: number; body: string }> {
+  public async contextFetch(
+    url: string,
+    init?: { method?: string; body?: string },
+    timeoutMs = 20000,
+  ): Promise<{ status: number; body: string }> {
     const page = await this.ensureFetchPage();
+    // A fetch that never responds would hang the caller forever (observed
+    // against scorebot); abort and surface it as an error instead.
     return page.evaluate(
-      async ({ url, init }) => {
-        const r = await fetch(url, {
-          method: init?.method ?? 'GET',
-          body: init?.body,
-          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-        });
-        return { status: r.status, body: await r.text() };
+      async ({ url, init, timeoutMs }) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const r = await fetch(url, {
+            method: init?.method ?? 'GET',
+            body: init?.body,
+            headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+            // The site's own socket.io polling sends credentials (cf_clearance
+            // for .hltv.org); a credential-less cross-origin fetch is what
+            // scorebot rejects/hangs.
+            credentials: 'include',
+            signal: controller.signal,
+          });
+          return { status: r.status, body: await r.text() };
+        } finally {
+          clearTimeout(timer);
+        }
       },
-      { url, init },
+      { url, init, timeoutMs },
     );
   }
 
@@ -153,7 +172,11 @@ class HltvEngine {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
       for (let i = 0; i < 10; i++) {
         const html = await page.content();
-        if (!html.includes('Just a moment...')) {
+        if (this.isRealSite(html)) {
+          // Remember the clearance this context just earned (bound to the UA
+          // in use) so later contexts — especially the scorebot origin page —
+          // start already cleared.
+          this.clearanceCookies = await context.cookies().catch(() => this.clearanceCookies);
           await page.waitForTimeout(500).catch(() => undefined);
           return await page.content();
         }
@@ -182,6 +205,18 @@ class HltvEngine {
     } finally {
       await context.close().catch(() => undefined);
     }
+  }
+
+  /** CF ships several interstitial variants; all of them block page fetches
+   *  via CSP, so only accept a page that unmistakably IS the site: real pages
+   *  carry the site nav (challenge pages never do). Note genuine pages also
+   *  contain CF beacon scripts (challenge-platform), so that string must NOT
+   *  be treated as an interstitial marker. */
+  private isRealSite(html: string): boolean {
+    if (!html || html.includes('Just a moment') || html.includes('security verification')) {
+      return false;
+    }
+    return html.includes('href="/matches"');
   }
 
   private localTimezone(): string {
@@ -214,11 +249,53 @@ class HltvEngine {
         throw new Error(`no browser available for scorebot\n${errors.join('\n')}`);
       }
     }
-    const context = await this.fetchBrowser!.newContext({ locale: 'en-US' });
-    // Stays on about:blank: scorebot allows any origin, so page-context fetch
-    // needs no HLTV origin and cannot get stuck on an interstitial.
-    this.fetchPage = await context.newPage();
-    return this.fetchPage;
+    if (!this.userAgent) {
+      this.userAgent = UA_FALLBACK;
+    }
+    const context = await this.fetchBrowser!.newContext({
+      userAgent: this.userAgent,
+      viewport: { width: 1440, height: 1200 },
+      locale: 'en-US',
+      timezoneId: this.localTimezone(),
+      ignoreHTTPSErrors: true,
+    });
+    if (this.clearanceCookies.length) {
+      await context.addCookies(this.clearanceCookies).catch(() => undefined);
+    }
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+    const page = await context.newPage();
+    // Park on the RSS feed: it shares the www.hltv.org origin (proper Origin
+    // header + shared .hltv.org cookies for scorebot), is a tiny XML document
+    // with zero page JS (a heavy homepage can starve the main thread and stall
+    // evaluates), and is never Cloudflare-challenged.
+    await page.goto('https://www.hltv.org/rss/news', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => undefined);
+    for (let round = 0; round < 3; round++) {
+      if (round > 0) {
+        await page.waitForTimeout(2000 * round).catch(() => undefined);
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => undefined);
+      }
+      for (let i = 0; i < 8; i++) {
+        let html = '';
+        try {
+          html = await page.content();
+        } catch {
+          // still navigating
+        }
+        // Chrome renders RSS feeds as a built-in preview page, so the literal
+        // '<rss' marker never appears in the serialized DOM. Any challenge-free
+        // hltv.org document is a valid parking spot.
+        const notChallenged = html && !html.includes('Just a moment') && !html.includes('security verification');
+        if (notChallenged && page.url().includes('hltv.org')) {
+          this.fetchPage = page;
+          return page;
+        }
+        await page.waitForTimeout(2000).catch(() => undefined);
+      }
+    }
+    await context.close().catch(() => undefined);
+    throw new Error('scorebot origin page stuck on Cloudflare challenge');
   }
 
   /**

@@ -7,7 +7,7 @@
 ## 设计原则
 
 1. **朴实无华**：不使用任何自定义背景与装饰性图标（无 AK 图标、无花哨配色），详情页使用 VSCode 主题原生观感，只展示 HLTV 页面上能看到的信息。
-2. **文字优先、媒体按需**：默认不发任何图片 / 第三方嵌入（Twitch、X、Spotify……）请求，仅显示文字说明；用户手动点击后才加载，再次点击可关闭。
+2. **文字优先、媒体统一开关**：默认不发任何图片 / 第三方嵌入（Twitch、X、Spotify……）请求，仅显示文字占位；页面右上角一个按钮统一控制 —— 一键全部加载，再点全部关闭。
 3. **时间可信**：HLTV 页面上的时间文本随请求方所在时区变化，因此一律解析页面 `data-unix` / JSON 中的绝对时间戳（epoch），在扩展内转换为用户本地时区显示。
 4. **轻量克制**：页面缓存为会话快照（抓一次用到手动刷新）；scorebot 实时流只服务于"正在看"的内容（展开中的卡片 / 打开中的详情页），折叠或关闭即退订。
 5. **一页一抓**：每个页面一个会话内至多抓取一次，之后全部走缓存；只有用户点击刷新按钮才会清空缓存重新抓取（沿用初代项目验证过的请求模型，从不触发 Cloudflare 风控）。侧栏仅抓取标题所需的列表页，展开某一项时才抓取该项对应的详情页。
@@ -57,7 +57,7 @@ HLTV
 - **右键 → 赛事详情页**：
   - 赛事格式卡片：瑞士轮 / 双败淘汰 / 单败淘汰等阶段结构；
   - 参赛战队、奖金池、地点、日期等（均为 HLTV 页面可见信息）；
-  - 战队**默认不显示图标**，提供逐个开关：点击加载图标，再次点击关闭。
+  - 战队**默认不显示图标**，右上角"加载战队图标"按钮统一开关（一键全部加载 / 全部关闭）。
 
 ### News（新闻）
 
@@ -65,7 +65,7 @@ HLTV
 - **右键菜单**：`查看详细页面` / `在 HLTV 打开`。
 - **新闻详情页**：完整的 HLTV 新闻页面（文字版）：
   - 标题、正文正常渲染；
-  - 图片与第三方嵌入控件默认不加载，仅显示文字占位说明（如"[图片：xxx]"、"[嵌入：Twitch 直播]"），点击手动加载、再点关闭；
+  - 图片与第三方嵌入控件默认不加载，仅显示文字占位说明（如"[图片：xxx]"、"[嵌入：Twitch 直播]"）；右上角"加载媒体"按钮一键全部加载、再点全部关闭；
   - 评论区正常显示。
 
 ## 架构
@@ -90,7 +90,7 @@ HLTV
 - **scorebot 直连**：实时比分/击杀流/选手实时数据通过 HLTV 自家的 socket.io（`scorebot-lb.hltv.org`，Engine.IO v4 polling 传输）订阅 —— 以页面上下文 fetch 发起（CORS 放行），单场用 `readyForMatch`、列表用 `readyForScores`。
 - **一页一抓**：页面一个会话内至多抓一次，缓存用到手动刷新；导航全串行且保持 ~1.5s 礼貌间隔。
 - **实时按需**：树节点展开或详情页打开时才订阅 scorebot，折叠 / 关闭即退订（scorebot 走独立 socket，不产生页面请求）。
-- **媒体策略集中实现**：webview 统一输出占位符，点击加载、再点关闭。
+- **媒体策略集中实现**：webview 统一输出占位符，右上角按钮一键全部加载 / 全部关闭。
 
 ### 目录结构（实际实现）
 
@@ -132,10 +132,10 @@ docs/research-notes.md      # HLTV 页面结构与 scorebot 协议研究笔记
 | 反爬 | Cloudflare 按 TLS 指纹拦截 → playwright-core + 系统浏览器（真 Chromium TLS 栈）；导航串行 + 礼貌间隔 + 挑战重试梯度 + **会话级快照缓存（仅手动刷新清空）** |
 | 时区 | 只解析 `data-unix` / epoch，本地渲染（HLTV 显示文本随请求方地理/时区设置变化，不可信） |
 | 实时数据 | scorebot socket.io polling：`score`（比分/半场/胜负）、`log`（击杀流，如 `ZywOo 击杀 mo0N [ak47] (HS)`）、`scoreboard`（选手实时 $/K/A/D/ADR/存活） |
-| 选手统计 | 传统值与 Eco 调整值都在服务端 HTML 中（显隐切换）；T/CT 侧数据按需抓取 Detailed stats 子页 |
+| 选手统计 | Both / T / CT 三套表与传统 / Eco 调整两套列**全部内嵌于比赛页 HTML**（网站本身就是纯前端显隐切换），切侧零网络请求 |
 | 对阵卡片 | 直接解析赛事页内嵌的 `data-slotted-bracket-json`（淘汰赛/双败完整对阵+比分+比赛链接） |
 | 详情页载体 | webview panel；样式仅用 VSCode 主题 CSS 变量，零自定义背景、零装饰图标 |
-| 媒体加载 | 默认零图片零嵌入请求；占位符点击加载、再点关闭；赛事页战队图标同样按需开关 |
+| 媒体加载 | 默认零图片零嵌入请求；右上角按钮统一控制，一键全部加载、再点全部关闭（含赛事页战队图标） |
 
 ## 里程碑
 
@@ -186,3 +186,30 @@ npm run compile   # 类型检查 + 打包到 dist/
 | `npm run package` | 生产压缩打包（供 `.vsix` 打包用） |
 
 开发辅助：`scripts/parse-check.ts`（对 `docs/research-notes.md` 所述页面快照做解析回归）、`scripts/e2e.ts`（真实引擎端到端，需本地 Chromium）。
+
+## 打包与安装（.vsix）
+
+```bash
+npm install                # 首次或依赖变更后
+npx @vscode/vsce package   # 打包
+```
+
+打包会自动先执行 `vscode:prepublish`（即 `npm run package`：TypeScript 类型检查 + esbuild 生产压缩），产物为项目根目录的 **`hltv-browser-vscode-extension-<version>.vsix`**（约 3.5 MB，已验证）。
+
+体积构成：
+
+- `dist/extension.js` —— 单文件 bundle，cheerio 等纯 JS 依赖已并入；
+- `node_modules/playwright-core/` —— 唯一整体保留的依赖（运行时要启动浏览器进程，不能 bundle）；
+- `resources/icon.svg`、`README.md`、`LICENSE`。
+
+`scripts/`、`docs/`、`.agents/`、源码与测试快照均由 `.vscodeignore` 排除，不会进入安装包。
+
+**安装**：
+
+```bash
+code --install-extension hltv-browser-vscode-extension-0.1.0.vsix
+```
+
+或在 VSCode 扩展面板 → `···` → **"从 VSIX 安装…"** 选择该文件。WSL Remote 场景下请在 WSL 侧安装（扩展宿主运行在 Linux）。安装后按 [使用前提](#使用前提) 确认可用浏览器，即可使用。
+
+**发布新版本**：修改 `package.json` 的 `version` 后重新打包；如需发布到 Marketplace，执行 `npx @vscode/vsce publish`（需提前 `npx @vscode/vsce login <publisher>` 配置 Personal Access Token）。

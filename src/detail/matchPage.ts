@@ -41,12 +41,9 @@ class MatchDetailPage {
         scorebot.unsubscribe(this.detail.scorebot.id, this.scoreListener);
       }
     });
-    panel.webview.onDidReceiveMessage((msg: { type: string; statsUrl?: string; url?: string }) => {
+    panel.webview.onDidReceiveMessage((msg: { type: string; url?: string }) => {
       if (msg.type === 'openLink' && msg.url) {
         void vscode.env.openExternal(vscode.Uri.parse('https://www.hltv.org' + msg.url));
-      }
-      if (msg.type === 'sideStats' && msg.statsUrl) {
-        void this.loadSideStats(msg.statsUrl);
       }
     });
   }
@@ -128,9 +125,9 @@ class MatchDetailPage {
       parts.push('<h2>选手统计 <span class="sub">Rating 3.0 · K-D / ADR / KAST 含 Eco 调整列</span></h2>');
       parts.push('<div class="btnrow">');
       parts.push('<span class="muted">Side:</span>');
-      parts.push('<button data-side="Both" class="active side-btn">Both</button>');
-      parts.push('<button data-side="Terrorist" class="side-btn">T</button>');
-      parts.push('<button data-side="Counter-Terrorist" class="side-btn">CT</button>');
+      parts.push('<button data-side="both" class="active side-btn">Both</button>');
+      parts.push('<button data-side="t" class="side-btn">T</button>');
+      parts.push('<button data-side="ct" class="side-btn">CT</button>');
       parts.push('<span class="muted" style="margin-left:10px">Eco-adjusted:</span>');
       parts.push('<button id="ecoBtn" data-on="0">关闭</button>');
       parts.push('</div>');
@@ -141,7 +138,7 @@ class MatchDetailPage {
         }
         parts.push('</div>');
       }
-      parts.push('<div id="statsArea"></div><div id="sideStatsArea"></div>');
+      parts.push('<div id="statsArea"></div>');
     }
 
     // Lineups
@@ -155,8 +152,11 @@ class MatchDetailPage {
     const statsJson = JSON.stringify(d.stats);
     const script = `
 const statsData = ${statsJson};
-function statTables(mapId) {
-  const tables = statsData[mapId] || [];
+function statTables(mapId, side) {
+  // All three side variants are embedded in the page data — switching is a
+  // pure client-side filter, no request involved.
+  const tables = (statsData[mapId] || []).filter(t => t.side === side);
+  if (!tables.length) return '<p class="meta">该侧暂无数据</p>';
   return tables.map(t => {
     let h = '<table><tr><th>' + esc(t.team) + '</th><th class="trad">K-D</th><th class="eco">eK-eD</th><th>Swing</th><th class="trad">ADR</th><th class="eco">eADR</th><th class="trad">KAST</th><th class="eco">eKAST</th><th>Rating</th></tr>';
     for (const r of t.rows) {
@@ -174,9 +174,8 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s ?? 
 function ratingClass(v) { const n = parseFloat(v); if (isNaN(n)) return ''; return n >= 1.05 ? 'ratingPositive' : n <= 0.95 ? 'ratingNegative' : 'ratingNeutral'; }
 function renderStats() {
   const activeMap = document.querySelector('.map-btn.active')?.dataset.map || 'all';
-  document.getElementById('statsArea').innerHTML = statTables(activeMap);
-  document.getElementById('sideStatsArea').innerHTML = '';
-  document.querySelectorAll('.side-btn').forEach(b => { if (b.dataset.side === 'Both') b.classList.add('active'); else b.classList.remove('active'); });
+  const activeSide = document.querySelector('.side-btn.active')?.dataset.side || 'both';
+  document.getElementById('statsArea').innerHTML = statTables(activeMap, activeSide);
 }
 document.querySelectorAll('.map-btn').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('.map-btn').forEach(x => x.classList.remove('active'));
@@ -184,14 +183,7 @@ document.querySelectorAll('.map-btn').forEach(b => b.addEventListener('click', (
 }));
 document.querySelectorAll('.side-btn').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('.side-btn').forEach(x => x.classList.remove('active'));
-  b.classList.add('active');
-  const side = b.dataset.side;
-  if (side === 'Both') { renderStats(); return; }
-  const mapId = document.querySelector('.map-btn.active')?.dataset.map || 'all';
-  document.getElementById('sideStatsArea').innerHTML = '<p class="meta">正在加载 ' + side + ' 数据…</p>';
-  const statsUrl = (document.getElementById('mapStatsUrls')?.dataset[mapId]) || document.getElementById('mapStatsUrls')?.dataset.all;
-  if (!statsUrl) { document.getElementById('sideStatsArea').innerHTML = '<p class="meta">该地图暂无 Detailed stats 页面</p>'; return; }
-  acquireVsCodeApi().postMessage({ type: 'sideStats', statsUrl });
+  b.classList.add('active'); renderStats();
 }));
 document.getElementById('ecoBtn')?.addEventListener('click', (e) => {
   const btn = e.currentTarget;
@@ -217,9 +209,6 @@ window.addEventListener('message', (ev) => {
     }
   }
   if (m.type === 'playerState') renderScoreboard(m.state);
-  if (m.type === 'sideStatsResult') {
-    document.getElementById('sideStatsArea').innerHTML = m.html || '<p class="meta">无数据</p>';
-  }
 });
 function renderScoreboard(s) {
   const area = document.getElementById('playerTable');
@@ -238,47 +227,13 @@ function renderScoreboard(s) {
   }
   if (html) area.innerHTML = html;
 }
-renderStats();
-applyEcoBody();
-function applyEcoBody(){ document.body.classList.remove('eco'); }`;
-
-    // stash per-map detailed-stats URLs for on-demand side loading
-    const mapStatsUrls: Record<string, string> = {};
-    for (const m of d.maps) {
-      if (m.statsUrl && m.name) {
-        const statMap = d.statMaps.find((sm) => sm.name.toLowerCase() === m.name.toLowerCase());
-        if (statMap) {
-          mapStatsUrls[statMap.id] = m.statsUrl;
-        }
-      }
-    }
+renderStats();`;
 
     this.panel.webview.html = shellHtml(
       `${d.team1.name} vs ${d.team2.name} | HLTV`,
-      parts.join('') + `<div id="mapStatsUrls" data-all='${escapeHtml(mapStatsUrls[Object.keys(mapStatsUrls)[0]] ?? '')}' ${Object.entries(mapStatsUrls).map(([k, v]) => `data-${escapeHtml(k)}="${escapeHtml(v)}"`).join(' ')}></div><script>${script}</script>`,
+      parts.join('') + `<script>${script}</script>`,
       this.panel.webview.cspSource,
     );
-  }
-
-  private async loadSideStats(statsUrl: string): Promise<void> {
-    try {
-      const tables = await api.getSideStats(statsUrl);
-      const html = tables
-        .map((t) => {
-          const h: string[] = [`<table><tr><th>${escapeHtml(t.team)} <span class="muted">(${escapeHtml(t.side)})</span></th><th class="trad">K-D</th><th class="eco">eK-eD</th><th>Swing</th><th class="trad">ADR</th><th class="eco">eADR</th><th class="trad">KAST</th><th class="eco">eKAST</th><th>Rating</th></tr>`];
-          for (const r of t.rows) {
-            h.push(
-              `<tr><td>${escapeHtml(r.nick)}</td><td class="num trad">${escapeHtml(r.kd || '-')}</td><td class="num eco">${escapeHtml(r.ekd || '-')}</td><td class="num">${escapeHtml(r.swing || '-')}</td><td class="num trad">${escapeHtml(r.adr || '-')}</td><td class="num eco">${escapeHtml(r.eadr || '-')}</td><td class="num trad">${escapeHtml(r.kast || '-')}</td><td class="num eco">${escapeHtml(r.ekast || '-')}</td><td class="num">${escapeHtml(r.rating || '-')}</td></tr>`,
-            );
-          }
-          h.push('</table>');
-          return h.join('');
-        })
-        .join('');
-      void this.panel.webview.postMessage({ type: 'sideStatsResult', html: html || '<p class="meta">该侧暂无数据</p>' });
-    } catch {
-      void this.panel.webview.postMessage({ type: 'sideStatsResult', html: '<p class="meta">加载失败</p>' });
-    }
   }
 
   private scoreText(frame: ScoreFrame): { scoreLine: string; mapsLine: string; mapName: string } {

@@ -120,8 +120,13 @@ export interface StatRow {
   ratingClass: string;
 }
 
+export type StatSide = 'both' | 't' | 'ct';
+
 export interface StatsTable {
   team: string;
+  /** The match page embeds all three variants (totalstats/tstats/ctstats) and
+   *  toggles visibility client-side — no extra request is ever needed. */
+  side: StatSide;
   rows: StatRow[];
 }
 
@@ -214,10 +219,4 @@ export interface HalfScore {
 
 export interface LogItem {
   [event: string]: unknown;
-}
-
-export interface SideStatsTable {
-  side: string; // "Both" | "Terrorist" | "Counter-Terrorist"
-  team: string;
-  rows: StatRow[];
 }

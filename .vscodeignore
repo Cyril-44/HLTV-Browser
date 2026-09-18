@@ -7,3 +7,8 @@ tsconfig.json
 .agents/**
 docs/**
 scripts/**
+.playwright-cli/**
+# cheerio is bundled into dist by esbuild; playwright-core must stay external
+# (it spawns browsers at runtime), so it is the only dependency shipped whole.
+node_modules/**
+!node_modules/playwright-core/**

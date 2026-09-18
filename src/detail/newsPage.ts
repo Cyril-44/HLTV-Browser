@@ -40,6 +40,7 @@ class NewsDetailPage {
 
   private render(d: NewsDetail): void {
     const parts: string[] = [];
+    parts.push(`<button id="mediaToggle" class="media-toggle" data-on="0">加载媒体</button>`);
     parts.push(`<h1>${escapeHtml(d.title)}</h1>`);
     parts.push(
       `<p class="meta">${[d.author, d.date ? formatDateTime(d.date) : ''].filter(Boolean).map(escapeHtml).join(' · ')}</p>`,
@@ -48,7 +49,7 @@ class NewsDetailPage {
       parts.push(`<blockquote>${escapeHtml(d.intro)}</blockquote>`);
     }
 
-    for (const [i, block] of d.blocks.entries()) {
+    for (const block of d.blocks) {
       switch (block.kind) {
         case 'text':
           parts.push(`<p>${escapeHtml(block.text)}${block.link ? ` <a href="#" class="extlink" data-url="${escapeHtml(block.link)}">[链接]</a>` : ''}</p>`);
@@ -58,12 +59,12 @@ class NewsDetailPage {
           break;
         case 'image':
           parts.push(
-            `<div><span class="placeholder media" data-kind="image" data-src="${escapeHtml(block.src)}" data-index="${i}">[图片${block.label ? `: ${escapeHtml(block.label)}` : ''}] 点击加载</span><span class="loaded" data-index="${i}"></span></div>`,
+            `<div class="media-slot" data-kind="image" data-src="${escapeHtml(block.src)}"><span class="placeholder">[图片${block.label ? `：${escapeHtml(block.label)}` : ''}]</span></div>`,
           );
           break;
         case 'embed':
           parts.push(
-            `<div><span class="placeholder media" data-kind="embed" data-src="${escapeHtml(block.src)}" data-index="${i}" data-provider="${escapeHtml(block.provider)}">[嵌入: ${escapeHtml(block.provider)}] 点击加载</span><span class="loaded" data-index="${i}"></span></div>`,
+            `<div class="media-slot" data-kind="embed" data-src="${escapeHtml(block.src)}" data-provider="${escapeHtml(block.provider)}"><span class="placeholder">[嵌入: ${escapeHtml(block.provider)}]</span></div>`,
           );
           break;
       }
@@ -81,28 +82,35 @@ class NewsDetailPage {
     }
 
     const script = `
-document.querySelectorAll('.media').forEach(el => el.addEventListener('click', () => {
-  const target = document.querySelector('.loaded[data-index="' + el.dataset.index + '"]');
-  const loaded = target.dataset.on === '1';
-  if (!loaded) {
-    if (el.dataset.kind === 'image') {
-      const img = document.createElement('img');
-      img.src = el.dataset.src; img.style.maxWidth = '100%';
-      target.appendChild(img);
+// One toggle in the top-right corner controls ALL media: load everything at
+// once, or tear everything down again (iframes are destroyed, not hidden).
+document.getElementById('mediaToggle').addEventListener('click', (e) => {
+  const btn = e.currentTarget;
+  const turnOn = btn.dataset.on !== '1';
+  btn.dataset.on = turnOn ? '1' : '0';
+  btn.textContent = turnOn ? '关闭媒体' : '加载媒体';
+  btn.classList.toggle('active', turnOn);
+  document.querySelectorAll('.media-slot').forEach(slot => {
+    if (turnOn) {
+      slot.classList.add('filled');
+      if (!slot.querySelector('img, iframe')) {
+        if (slot.dataset.kind === 'image') {
+          const img = document.createElement('img');
+          img.src = slot.dataset.src; img.style.maxWidth = '100%';
+          slot.appendChild(img);
+        } else {
+          const frame = document.createElement('iframe');
+          frame.src = slot.dataset.src; frame.width = '100%'; frame.height = '152';
+          frame.allow = 'autoplay; encrypted-media';
+          slot.appendChild(frame);
+        }
+      }
     } else {
-      const frame = document.createElement('iframe');
-      frame.src = el.dataset.src; frame.width = '100%'; frame.height = '152';
-      frame.allow = 'autoplay; encrypted-media';
-      target.appendChild(frame);
+      slot.classList.remove('filled');
+      slot.querySelectorAll('img, iframe').forEach(el => el.remove());
     }
-    target.dataset.on = '1';
-    el.textContent = el.dataset.kind === 'image' ? '[图片已加载] 点击关闭' : '[嵌入: ' + el.dataset.provider + '] 点击关闭';
-  } else {
-    target.innerHTML = '';
-    target.dataset.on = '0';
-    el.textContent = el.dataset.kind === 'image' ? '[图片] 点击加载' : '[嵌入: ' + el.dataset.provider + '] 点击加载';
-  }
-}));
+  });
+});
 document.querySelectorAll('.extlink').forEach(a => a.addEventListener('click', e => {
   e.preventDefault(); acquireVsCodeApi().postMessage({ type: 'openLink', url: a.dataset.url });
 }));`;

@@ -120,7 +120,6 @@ export class ScorebotClient {
         if (!this.sid) {
           await this.handshake();
           await this.post('40');
-          this.onConnected();
           await this.sendSubscriptions();
           this.freshSession = true;
         }
@@ -149,7 +148,7 @@ export class ScorebotClient {
   }
 
   private async handshake(): Promise<void> {
-    const r = await engine.contextFetch(`${SCOREBOT_URL}/socket.io/?EIO=4&transport=polling&t=${Date.now()}`);
+    const r = await engine.contextFetch(`${SCOREBOT_URL}/socket.io/?EIO=4&transport=polling&t=${Date.now()}`, undefined, 15000);
     if (r.status !== 200 || !r.body.startsWith('0')) {
       throw new Error(`scorebot handshake failed: ${r.status}`);
     }
@@ -164,6 +163,7 @@ export class ScorebotClient {
     const r = await engine.contextFetch(
       `${SCOREBOT_URL}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${this.sid}`,
       { method: 'POST', body },
+      15000,
     );
     if (r.status !== 200) {
       throw new Error(`scorebot post failed: ${r.status}`);
@@ -174,8 +174,11 @@ export class ScorebotClient {
     if (!this.sid) {
       throw new Error('scorebot not connected');
     }
+    // engine.io pings every ~25s, so a healthy long-poll returns within that window
     const r = await engine.contextFetch(
       `${SCOREBOT_URL}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${this.sid}`,
+      undefined,
+      30000,
     );
     if (r.status !== 200) {
       throw new Error(`scorebot poll failed: ${r.status}`);

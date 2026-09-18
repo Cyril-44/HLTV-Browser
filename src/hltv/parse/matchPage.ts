@@ -122,39 +122,48 @@ function parseStats($: CheerioAPI): { statMaps: { id: string; name: string }[]; 
   }
 
   const stats: { [mapId: string]: StatsTable[] } = {};
+  // The page embeds three table variants per team — totalstats (Both),
+  // tstats (T), ctstats (CT) — and toggles them client-side.
+  const SIDE_TABLES: [string, 'both' | 't' | 'ct'][] = [
+    ['totalstats', 'both'],
+    ['tstats', 't'],
+    ['ctstats', 'ct'],
+  ];
   for (const content of $('.stats-content')) {
     const $content = $(content);
     const contentId = $content.attr('id') ?? 'all';
     const mapId = contentId.replace(/-content$/, '');
     const tables: StatsTable[] = [];
-    for (const table of $content.find('table.totalstats')) {
-      const $table = $(table);
-      const team = $table.find('.teamName').first().text().trim();
-      const rows: StatRow[] = [];
-      for (const tr of $table.find('tr')) {
-        const $tr = $(tr);
-        const nameCell = $tr.find('.players .statsPlayerName').first();
-        if (!nameCell.length) {
-          continue;
+    for (const [tableClass, side] of SIDE_TABLES) {
+      for (const table of $content.find(`table.${tableClass}`)) {
+        const $table = $(table);
+        const team = $table.find('.teamName').first().text().trim();
+        const rows: StatRow[] = [];
+        for (const tr of $table.find('tr')) {
+          const $tr = $(tr);
+          const nameCell = $tr.find('.players .statsPlayerName').first();
+          if (!nameCell.length) {
+            continue;
+          }
+          const nick = $tr.find('.player-nick').first().text().trim() || nameCell.text().trim();
+          const player = nameCell.text().replace(/\s+/g, ' ').trim();
+          rows.push({
+            player,
+            nick,
+            kd: cell($tr, 'kd', 'traditional-data'),
+            ekd: cell($tr, 'kd', 'eco-adjusted-data'),
+            swing: cell($tr, 'roundSwing', ''),
+            adr: cell($tr, 'adr', 'traditional-data'),
+            eadr: cell($tr, 'adr', 'eco-adjusted-data'),
+            kast: cell($tr, 'kast', 'traditional-data'),
+            ekast: cell($tr, 'kast', 'eco-adjusted-data'),
+            rating: $tr.find('td.rating').first().text().trim(),
+            ratingClass: $tr.find('td.rating').first().attr('class') ?? '',
+          });
         }
-        const nick = $tr.find('.player-nick').first().text().trim() || nameCell.text().trim();
-        const player = nameCell.text().replace(/\s+/g, ' ').trim();
-        rows.push({
-          player,
-          nick,
-          kd: cell($tr, 'kd', 'traditional-data'),
-          ekd: cell($tr, 'kd', 'eco-adjusted-data'),
-          swing: cell($tr, 'roundSwing', ''),
-          adr: cell($tr, 'adr', 'traditional-data'),
-          eadr: cell($tr, 'adr', 'eco-adjusted-data'),
-          kast: cell($tr, 'kast', 'traditional-data'),
-          ekast: cell($tr, 'kast', 'eco-adjusted-data'),
-          rating: $tr.find('td.rating').first().text().trim(),
-          ratingClass: $tr.find('td.rating').first().attr('class') ?? '',
-        });
-      }
-      if (team && rows.length) {
-        tables.push({ team, rows });
+        if (team && rows.length) {
+          tables.push({ team, side, rows });
+        }
       }
     }
     if (tables.length) {

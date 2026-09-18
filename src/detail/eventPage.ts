@@ -96,13 +96,14 @@ class EventDetailPage {
     }
 
     if (d.teams.length) {
-      parts.push('<h2>参赛战队 <span class="sub">图标默认不加载，点击按钮加载/关闭</span></h2><div class="teamgrid">');
+      if (d.teams.some((t) => t.logo)) {
+        parts.push('<button id="logoToggle" class="media-toggle" data-on="0">加载战队图标</button>');
+      }
+      parts.push('<h2>参赛战队 <span class="sub">图标默认不加载，右上角按钮统一开关</span></h2><div class="teamgrid">');
       for (const t of d.teams) {
         const ranks = [t.worldRank ? `HLTV ${t.worldRank}` : '', t.vrsRank ? `VRS ${t.vrsRank}` : ''].filter(Boolean).join(' / ');
         parts.push(
-          `<div class="teamcell"><span class="logo-slot" data-src="${escapeHtml(t.logo)}">[LOGO]</span> <strong>${escapeHtml(t.name)}</strong>${ranks ? ` <span class="muted">${escapeHtml(ranks)}</span>` : ''}` +
-            (t.logo ? ` <button class="logo-btn" data-src="${escapeHtml(t.logo)}" data-on="0">加载图标</button>` : '') +
-            `</div>`,
+          `<div class="teamcell">${t.logo ? `<span class="logo-slot" data-src="${escapeHtml(t.logo)}"></span> ` : ''}<strong>${escapeHtml(t.name)}</strong>${ranks ? ` <span class="muted">${escapeHtml(ranks)}</span>` : ''}</div>`,
         );
       }
       parts.push('</div>');
@@ -122,20 +123,25 @@ document.querySelectorAll('.matchlink').forEach(a => a.addEventListener('click',
 document.querySelectorAll('.extlink').forEach(a => a.addEventListener('click', e => {
   e.preventDefault(); acquireVsCodeApi().postMessage({ type: 'openLink', url: a.dataset.url });
 }));
-document.querySelectorAll('.logo-btn').forEach(btn => btn.addEventListener('click', () => {
-  const slot = btn.parentElement.querySelector('.logo-slot');
-  const on = btn.dataset.on === '1';
-  if (!on) {
-    slot.innerHTML = '';
-    const img = document.createElement('img');
-    img.src = btn.dataset.src; img.alt = 'logo'; img.height = 20;
-    slot.appendChild(img);
-    btn.textContent = '关闭图标'; btn.dataset.on = '1';
-  } else {
-    slot.textContent = '[LOGO]';
-    btn.textContent = '加载图标'; btn.dataset.on = '0';
-  }
-}));`;
+// One toggle loads/clears ALL team logos at once.
+document.getElementById('logoToggle')?.addEventListener('click', (e) => {
+  const btn = e.currentTarget;
+  const turnOn = btn.dataset.on !== '1';
+  btn.dataset.on = turnOn ? '1' : '0';
+  btn.textContent = turnOn ? '关闭战队图标' : '加载战队图标';
+  btn.classList.toggle('active', turnOn);
+  document.querySelectorAll('.logo-slot').forEach(slot => {
+    if (turnOn) {
+      if (!slot.querySelector('img')) {
+        const img = document.createElement('img');
+        img.src = slot.dataset.src; img.alt = 'logo'; img.height = 20;
+        slot.appendChild(img);
+      }
+    } else {
+      slot.querySelectorAll('img').forEach(el => el.remove());
+    }
+  });
+});`;
 
     this.panel.webview.html = shellHtml(`${d.name} | HLTV`, parts.join('') + `<script>${script}</script>`, this.panel.webview.cspSource);
   }
