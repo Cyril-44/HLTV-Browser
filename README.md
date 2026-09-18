@@ -85,7 +85,8 @@ HLTV
 └────────────────────────── hltv.org ───────────────────────────────┘
 ```
 
-- **浏览器引擎而非 HTTP 客户端**：HLTV 全站（除 RSS）按 TLS 指纹拦截非浏览器请求（实测 plain fetch / curl / got-scraping 全部 403），因此数据层基于 `playwright-core`（约 14MB 纯 JS，**不打包浏览器**）驱动系统已装的 Edge / Chrome / Chromium（可在设置 `hltv.browserPath` 指定），Windows 用户零额外下载。引擎隐藏自动化特征（webdriver 标记等）、串行导航并保持礼貌间隔、带 CF 挑战等待与重试梯度；页面缓存为会话级快照（抓一次用到手动刷新为止）。
+- **浏览器引擎而非 HTTP 客户端**：HLTV 全站（除 RSS）按 TLS 指纹拦截非浏览器请求（实测 plain fetch / curl / got-scraping 全部 403），因此数据层基于 `playwright-core`（约 14MB 纯 JS，**不打包浏览器**）驱动系统已装的 Edge / Chrome / Chromium（可在设置 `hltv.browserPath` 指定），Windows 用户零额外下载。
+- **完全复刻初代引擎的请求形态**（实测从不触发风控）：每次导航都使用**全新浏览器实例**、用完即关（天然串行、天然间隔、无状态污染）；上下文带真实 UA（读取二进制自带 UA 并清洗 headless 标记）、**真实本机时区**（UTC 与 CN IP 不符是典型机器人信号）、1440x1200 视口、文档级 HTTP 头（Accept / Accept-Language / Upgrade-Insecure-Requests）；**零请求拦截**（拦截子资源会破坏 CF 挑战页自身的探测脚本）；导航间 1.5–3 秒随机礼貌间隔。
 - **scorebot 直连**：实时比分/击杀流/选手实时数据通过 HLTV 自家的 socket.io（`scorebot-lb.hltv.org`，Engine.IO v4 polling 传输）订阅 —— 以页面上下文 fetch 发起（CORS 放行），单场用 `readyForMatch`、列表用 `readyForScores`。
 - **一页一抓**：页面一个会话内至多抓一次，缓存用到手动刷新；导航全串行且保持 ~1.5s 礼貌间隔。
 - **实时按需**：树节点展开或详情页打开时才订阅 scorebot，折叠 / 关闭即退订（scorebot 走独立 socket，不产生页面请求）。
@@ -159,6 +160,8 @@ docs/research-notes.md      # HLTV 页面结构与 scorebot 协议研究笔记
 4. Playwright 管理的 Chromium（`~/.cache/ms-playwright`）。
 
 频繁大量访问可能触发 Cloudflare 对本机 IP 的临时风控。此时扩展会先走自动重试梯度（同页 reload → 换新上下文）；若挑战仍不消解（IP 级标记），会**自动弹出浏览器窗口**（干净配置：无自动化标志、真实 UA），请在其中完成 Cloudflare 人机验证 —— 通过后窗口自动关闭，`cf_clearance` cookie 连同验证时的 UA 一起注入回无头引擎并继续加载（cookie 与 UA 绑定，必须成对使用）。无图形界面的环境（纯 SSH 等）无法弹窗。
+
+**验证弹窗的浏览器必须能连通 `challenges.cloudflare.com`** —— 如果你的正常浏览器是走代理打开 HLTV 的，请把代理地址填入设置 `hltv.proxyServer`（如 `http://127.0.0.1:7890`，留空则回退到 `HTTPS_PROXY`/`HTTP_PROXY` 环境变量），否则验证流程会因网络不通而无限循环。
 
 若 IP 已进入"挑战循环"（连真人验证也立即失效），两条路：
 

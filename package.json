@@ -134,6 +134,11 @@
     "configuration": {
       "title": "HLTV Browser",
       "properties": {
+        "hltv.proxyServer": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Proxy for reaching hltv.org and challenges.cloudflare.com, e.g. `http://127.0.0.1:7890`. Use the SAME network path as the browser you can open HLTV with, otherwise Cloudflare verification will loop. Falls back to the `HTTPS_PROXY`/`HTTP_PROXY` environment variables when empty."
+        },
         "hltv.browserPath": {
           "type": "string",
           "default": "",

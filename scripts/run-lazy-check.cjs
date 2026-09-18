@@ -32,6 +32,7 @@ const makePage = () => {
     },
     reload: async () => undefined,
     waitForTimeout: async () => undefined,
+    setExtraHTTPHeaders: async () => undefined,
     content: async () => {
       const file = htmlFor(currentUrl);
       if (!file) {
@@ -40,7 +41,10 @@ const makePage = () => {
       return fs.readFileSync(file, 'utf8');
     },
     context: () => ({ newPage: async () => makePage(), close: async () => undefined }),
-    evaluate: async () => {
+    evaluate: async (fn) => {
+      if (typeof fn === 'function' && String(fn).includes('navigator.userAgent')) {
+        return 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36';
+      }
       throw new Error('network fetch disabled in offline check');
     },
   };
@@ -51,6 +55,7 @@ const fakeBrowser = {
   newContext: async () => ({
     newPage: async () => makePage(),
     addInitScript: async () => undefined,
+    addCookies: async () => undefined,
     close: async () => undefined,
   }),
   close: async () => undefined,

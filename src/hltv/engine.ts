@@ -4,31 +4,66 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import { chromium, Browser, BrowserContext, Cookie, Page } from 'playwright-core';
 
-const CHROME_UA_FALLBACK =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-
-const BLOCKED_RESOURCE_TYPES = new Set(['image', 'media', 'font']);
-
 /**
- * Browser-backed fetch engine. HLTV sits behind Cloudflare bot management which
- * fingerprints TLS, so plain Node HTTP is rejected; a real Chromium (user's
- * Edge/Chrome, or a Playwright-managed Chromium) is the leanest engine that passes.
+ * Browser-backed fetch engine mirroring the request model of the original
+ * extension (master), which never tripped Cloudflare:
+ *
+ *  - one navigation at a time, each in a FRESH browser instance that is closed
+ *    afterwards (inherently serial, naturally paced, no state pollution)
+ *  - human-like context: real UA (headless token sanitized), real local
+ *    timezone, 1440x1200 viewport, document-like HTTP headers
+ *  - NO request interception of any kind — blocking subresources breaks the
+ *    Cloudflare challenge's own probes
+ *  - pages are cached by the api layer and fetched at most once per session;
+ *    this engine is only hit on first load or manual refresh
  */
+const MASTER_LAUNCH_ARGS = [
+  '--disable-blink-features=AutomationControlled',
+  '--disable-dev-shm-usage',
+  '--disable-features=IsolateOrigins,site-per-process',
+];
+
+const MASTER_HEADERS = {
+  'Accept-Language': 'en-US,en;q=0.9',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+  'Upgrade-Insecure-Requests': '1',
+  'Cache-Control': 'no-cache',
+};
+
+// UA confirmed working against HLTV from this environment (Chrome for
+// Testing 153 on WSL, provided by the user); only used if probing fails.
+const UA_FALLBACK =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36';
+
 class HltvEngine {
-  private browser: Browser | null = null;
-  private navPage: Page | null = null;
-  private apiPage: Page | null = null;
   private chain: Promise<unknown> = Promise.resolve();
   private launchErrorShown = false;
   private storagePath: string | null = null;
   private solving: Promise<boolean> | null = null;
   /** cf_clearance is bound to the UA that earned it — the engine must match. */
-  private userAgent = CHROME_UA_FALLBACK;
+  private userAgent: string | null = null;
   private clearanceCookies: Cookie[] = [];
+  private fetchBrowser: Browser | null = null;
+  private fetchPage: Page | null = null;
+  private lastNavigation = 0;
 
   /** Extension global storage — keeps the manual-verification browser profile. */
   public setStoragePath(p: string): void {
     this.storagePath = p;
+  }
+
+  /**
+   * Optional proxy (e.g. "http://127.0.0.1:7890"). Cloudflare's challenge
+   * backend must be reachable through the same network path the user's normal
+   * browser uses, or verification loops forever. Precedence: setting > env.
+   */
+  private proxyOption(): { server: string } | undefined {
+    const configured = vscode.workspace.getConfiguration('hltv').get<string>('proxyServer', '').trim();
+    if (configured) {
+      return { server: configured };
+    }
+    const env = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy;
+    return env ? { server: env } : undefined;
   }
 
   public async getHtml(url: string): Promise<string> {
@@ -36,11 +71,11 @@ class HltvEngine {
   }
 
   /**
-   * Fetch a URL from inside a page whose origin is www.hltv.org, so the request
-   * carries browser TLS + Cloudflare clearance cookies (needed by scorebot).
+   * Fetch a URL from an about:blank page context (scorebot serves permissive
+   * CORS). Lives on a small persistent browser separate from page navigation.
    */
   public async contextFetch(url: string, init?: { method?: string; body?: string }): Promise<{ status: number; body: string }> {
-    const page = await this.ensureApiPage();
+    const page = await this.ensureFetchPage();
     return page.evaluate(
       async ({ url, init }) => {
         const r = await fetch(url, {
@@ -55,10 +90,9 @@ class HltvEngine {
   }
 
   public async dispose(): Promise<void> {
-    await this.browser?.close().catch(() => undefined);
-    this.browser = null;
-    this.navPage = null;
-    this.apiPage = null;
+    await this.fetchBrowser?.close().catch(() => undefined);
+    this.fetchBrowser = null;
+    this.fetchPage = null;
   }
 
   private serialize<T>(task: () => Promise<T>): Promise<T> {
@@ -68,31 +102,156 @@ class HltvEngine {
   }
 
   private async navigate(url: string): Promise<string> {
-    // Cloudflare bot scoring dislikes bursts — keep a polite gap between hits.
     await this.throttle();
+    // Two fresh-browser attempts, then let the user clear an interactive
+    // challenge, then a final attempt with the fresh clearance.
+    for (let i = 0; i < 2; i++) {
+      try {
+        return await this.freshNavigate(url);
+      } catch {
+        // fall through to the next fresh attempt
+      }
+    }
+    const solved = await this.solveChallengeManually(url);
+    if (solved) {
+      return this.freshNavigate(url);
+    }
+    throw new Error(`Cloudflare challenge did not clear for ${url}`);
+  }
+
+  /** Politeness gap with jitter — never let requests look bursty. */
+  private async throttle(): Promise<void> {
+    const gap = 1500 + Math.floor(Math.random() * 1500);
+    const wait = this.lastNavigation + gap - Date.now();
+    if (wait > 0) {
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    this.lastNavigation = Date.now();
+  }
+
+  private async freshNavigate(url: string): Promise<string> {
+    const browser = await this.ensureLaunch();
     try {
-      return await this.attemptNavigate(url);
+      if (!this.userAgent) {
+        await this.probeUserAgent(browser);
+      }
+      const context = await browser.newContext({
+        userAgent: this.userAgent ?? UA_FALLBACK,
+        viewport: { width: 1440, height: 1200 },
+        locale: 'en-US',
+        timezoneId: this.localTimezone(),
+        ignoreHTTPSErrors: true,
+      });
+      if (this.clearanceCookies.length) {
+        await context.addCookies(this.clearanceCookies).catch(() => undefined);
+      }
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      });
+      const page = await context.newPage();
+      await page.setExtraHTTPHeaders(MASTER_HEADERS);
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      for (let i = 0; i < 10; i++) {
+        const html = await page.content();
+        if (!html.includes('Just a moment...')) {
+          await page.waitForTimeout(500).catch(() => undefined);
+          return await page.content();
+        }
+        await page.waitForTimeout(2000).catch(() => undefined);
+      }
+      throw new Error(`Cloudflare challenge did not clear for ${url}`);
+    } finally {
+      await browser.close().catch(() => undefined);
+    }
+  }
+
+  /** Read the binary's genuine UA once; sanitize the headless token. */
+  private async probeUserAgent(browser: Browser): Promise<void> {
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 1200 },
+      locale: 'en-US',
+      timezoneId: this.localTimezone(),
+      ignoreHTTPSErrors: true,
+    });
+    const page = await context.newPage();
+    try {
+      const ua = await page
+        .evaluate(() => navigator.userAgent)
+        .catch(() => UA_FALLBACK);
+      this.userAgent = ua.replace(/HeadlessChrome/i, 'Chrome');
+    } finally {
+      await context.close().catch(() => undefined);
+    }
+  }
+
+  private localTimezone(): string {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
     } catch {
-      // The challenge survived the automatic ladder (typically an IP-level
-      // flag): let the user clear it manually in a visible browser window,
-      // then retry with the freshly granted clearance cookie.
-      const solved = await this.solveChallengeManually(url);
-      if (solved) {
+      return 'Asia/Shanghai';
+    }
+  }
+
+  private async ensureFetchPage(): Promise<Page> {
+    if (this.fetchPage && !this.fetchPage.isClosed()) {
+      return this.fetchPage;
+    }
+    // A single long-lived browser just for scorebot fetches; navigation uses
+    // throwaway browsers, so this one needs its own launch loop.
+    if (!this.fetchBrowser || !this.fetchBrowser.isConnected()) {
+      const errors: string[] = [];
+      let launched = false;
+      for (const a of this.launchAttempts()) {
         try {
-          return await this.attemptNavigate(url);
-        } catch {
-          // fall through to a clean-context retry
+          this.fetchBrowser = await chromium.launch({ headless: true, args: MASTER_LAUNCH_ARGS, proxy: this.proxyOption(), ...a.options });
+          launched = true;
+          break;
+        } catch (e) {
+          errors.push(`${a.label}: ${String(e).split('\n')[0]}`);
         }
       }
-      await this.resetNavPage();
-      return this.attemptNavigate(url);
+      if (!launched) {
+        throw new Error(`no browser available for scorebot\n${errors.join('\n')}`);
+      }
+    }
+    const context = await this.fetchBrowser!.newContext({ locale: 'en-US' });
+    // Stays on about:blank: scorebot allows any origin, so page-context fetch
+    // needs no HLTV origin and cannot get stuck on an interstitial.
+    this.fetchPage = await context.newPage();
+    return this.fetchPage;
+  }
+
+  /**
+   * Escape hatch: a cf_clearance token + matching UA pasted by the user from a
+   * trusted browser on the same public IP (settings hltv.cfClearance/hltv.userAgent).
+   */
+  private loadManualClearance(): void {
+    const cfg = vscode.workspace.getConfiguration('hltv');
+    const token = cfg.get<string>('cfClearance', '').trim();
+    const ua = cfg.get<string>('userAgent', '').trim();
+    if (ua) {
+      this.userAgent = ua;
+    }
+    if (token) {
+      this.clearanceCookies = [
+        {
+          name: 'cf_clearance',
+          value: token,
+          domain: '.hltv.org',
+          path: '/',
+          expires: -1,
+          secure: true,
+          httpOnly: true,
+          sameSite: 'Lax',
+        },
+      ];
     }
   }
 
   /**
    * Opens a small headful browser window on the challenged URL so the user can
    * complete Cloudflare's interactive verification. On success the clearance
-   * cookies are copied into the headless context and navigation resumes.
+   * cookies are remembered (with the UA that earned them) for later contexts.
    * Single-flight: concurrent blocked navigations share one popup.
    */
   private async solveChallengeManually(url: string): Promise<boolean> {
@@ -132,13 +291,10 @@ class HltvEngine {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => undefined);
       cleared = await this.waitForClearance(page, 300_000);
       if (cleared) {
-        // Remember the clearance together with the UA that earned it, then
-        // rebuild the headless context so both stay consistent.
         this.clearanceCookies = await ctx.cookies().catch(() => []);
         this.userAgent = await page
           .evaluate(() => navigator.userAgent)
           .catch(() => this.userAgent);
-        await this.resetNavPage();
       }
     } finally {
       await ctx.close().catch(() => undefined);
@@ -157,7 +313,6 @@ class HltvEngine {
         // real binary version must match its own UA), normal window size.
         const ctx = await chromium.launchPersistentContext(profileDir, {
           headless: false,
-          ignoreDefaultArgs: ['--enable-automation'],
           args: [
             '--disable-blink-features=AutomationControlled',
             '--disable-dev-shm-usage',
@@ -166,6 +321,8 @@ class HltvEngine {
             '--window-size=980,720',
           ],
           locale: 'en-US',
+          timezoneId: this.localTimezone(),
+          proxy: this.proxyOption(),
           ...a.options,
         });
         await ctx.addInitScript(() => {
@@ -200,125 +357,8 @@ class HltvEngine {
     return false;
   }
 
-  private lastNavigation = 0;
-
-  private async throttle(): Promise<void> {
-    const gap = 1500;
-    const wait = this.lastNavigation + gap - Date.now();
-    if (wait > 0) {
-      await new Promise((r) => setTimeout(r, wait));
-    }
-    this.lastNavigation = Date.now();
-  }
-
-  private async attemptNavigate(url: string): Promise<string> {
-    const page = await this.ensureNavPage();
-    // Retry ladder: reload in-place (keeps Cloudflare clearance cookies) with
-    // growing pauses; only escalate to a fresh context from navigate().
-    for (let round = 0; round < 3; round++) {
-      if (round === 0) {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      } else {
-        await page.waitForTimeout(2000 * round).catch(() => undefined);
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => undefined);
-      }
-      for (let i = 0; i < 12; i++) {
-        const html = await page.content();
-        if (!html.includes('Just a moment...')) {
-          await page.waitForTimeout(400).catch(() => undefined);
-          return await page.content();
-        }
-        await page.waitForTimeout(2500).catch(() => undefined);
-      }
-    }
-    throw new Error(`Cloudflare challenge did not clear for ${url}`);
-  }
-
-  private async resetNavPage(): Promise<void> {
-    const page = this.navPage;
-    this.navPage = null;
-    this.apiPage = null;
-    await page?.context().close().catch(() => undefined);
-  }
-
-  private async ensureNavPage(): Promise<Page> {
-    if (this.navPage && !this.navPage.isClosed()) {
-      return this.navPage;
-    }
-    this.loadManualClearance();
-    const browser = await this.ensureBrowser();
-    const context = await browser.newContext({ userAgent: this.userAgent, locale: 'en-US', timezoneId: 'UTC' });
-    if (this.clearanceCookies.length) {
-      await context.addCookies(this.clearanceCookies).catch(() => undefined);
-    }
-    // Cloudflare reads navigator.webdriver and the automation blink flag;
-    // neutralize both so headless looks like an ordinary Chrome session.
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-    });
-    const page = await context.newPage();
-    await this.installResourceBlocking(page);
-    this.navPage = page;
-    return page;
-  }
-
-  /**
-   * Escape hatch: a cf_clearance token + matching UA pasted by the user from a
-   * trusted browser on the same public IP (settings hltv.cfClearance/hltv.userAgent).
-   */
-  private loadManualClearance(): void {
-    const cfg = vscode.workspace.getConfiguration('hltv');
-    const token = cfg.get<string>('cfClearance', '').trim();
-    const ua = cfg.get<string>('userAgent', '').trim();
-    if (ua) {
-      this.userAgent = ua;
-    }
-    if (token) {
-      this.clearanceCookies = [
-        {
-          name: 'cf_clearance',
-          value: token,
-          domain: '.hltv.org',
-          path: '/',
-          expires: -1, // session cookie — playwright refreshes the real expiry from the value itself
-          secure: true,
-          httpOnly: true,
-          sameSite: 'Lax',
-        },
-      ];
-    }
-  }
-
-  private async ensureApiPage(): Promise<Page> {
-    if (this.apiPage && !this.apiPage.isClosed()) {
-      return this.apiPage;
-    }
-    const page = await this.ensureNavPage();
-    const context = page.context();
-    const api = await context.newPage();
-    await this.installResourceBlocking(api);
-    // The page stays on about:blank: scorebot serves permissive CORS headers,
-    // so page-context fetch needs no HLTV origin and cannot get stuck on a
-    // Cloudflare interstitial.
-    this.apiPage = api;
-    return api;
-  }
-
-  private async installResourceBlocking(page: Page): Promise<void> {
-    await page.route('**/*', (route) => {
-      const type = route.request().resourceType();
-      if (BLOCKED_RESOURCE_TYPES.has(type)) {
-        return route.abort();
-      }
-      const u = route.request().url();
-      if (/cookielaw|onetrust|googletagmanager|google-analytics|outbrain|clean\.gg|plausible|doubleclick/.test(u)) {
-        return route.abort();
-      }
-      return route.continue();
-    });
-  }
-
   private launchAttempts(): { label: string; options: Record<string, unknown> }[] {
+    this.loadManualClearance();
     const custom = vscode.workspace.getConfiguration('hltv').get<string>('browserPath', '');
     const attempts: { label: string; options: Record<string, unknown> }[] = [];
     if (custom) {
@@ -388,20 +428,11 @@ class HltvEngine {
     }
   }
 
-  private async ensureBrowser(): Promise<Browser> {
-    if (this.browser && this.browser.isConnected()) {
-      return this.browser;
-    }
+  private async ensureLaunch(): Promise<Browser> {
     const errors: string[] = [];
     for (const a of this.launchAttempts()) {
       try {
-        this.browser = await chromium.launch({
-          headless: true,
-          ignoreDefaultArgs: ['--enable-automation'],
-          args: ['--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage'],
-          ...a.options,
-        });
-        return this.browser;
+        return await chromium.launch({ headless: true, args: MASTER_LAUNCH_ARGS, proxy: this.proxyOption(), ...a.options });
       } catch (e) {
         errors.push(`${a.label}: ${String(e).split('\n')[0]}`);
       }

@@ -33,7 +33,7 @@ async function main(): Promise<void> {
   const loadingRow = cardBefore.find((c) => c.label.includes('加载中'));
   console.log(`card before: ${cardBefore.length} rows; loading row present: ${Boolean(loadingRow)}`);
 
-  await new Promise((r) => setTimeout(r, 3500));
+  await new Promise((r) => setTimeout(r, 6000));
   const cardAfter = live.children();
   const labels = cardAfter.map((c) => String(c.label));
   console.log(`card after: ${cardAfter.length} rows`);
