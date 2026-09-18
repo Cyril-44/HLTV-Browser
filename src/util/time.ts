@@ -21,10 +21,7 @@ export function formatDateTime(epochMs: number): string {
   return dateTimeFmt.format(new Date(epochMs));
 }
 
-/** "17:30" + relative day label for upcoming matches */
+/** Date + local time, always including the date ("Fri 18 Sep 17:30"). */
 export function formatMatchTime(epochMs: number): string {
-  const d = new Date(epochMs);
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  return sameDay ? formatTime(epochMs) : `${formatDate(epochMs)} ${formatTime(epochMs)}`;
+  return `${formatDate(epochMs)} ${formatTime(epochMs)}`;
 }

@@ -139,10 +139,15 @@
           "default": "",
           "markdownDescription": "Path to a Chromium-based browser executable used for fetching HLTV pages (Chrome / Edge / Chromium). Leave empty to auto-detect: Edge → Chrome → Playwright-managed Chromium."
         },
-        "hltv.listCacheSeconds": {
-          "type": "number",
-          "default": 60,
-          "description": "How long sidebar lists (matches/results/events/news) are cached before refetching."
+        "hltv.cfClearance": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Escape hatch for a hard-flagged IP: paste the `cf_clearance` cookie value copied from a normal browser that can open hltv.org (F12 → Application → Cookies). Must be paired with `hltv.userAgent` from the same browser, and the browser must share this machine's public IP."
+        },
+        "hltv.userAgent": {
+          "type": "string",
+          "default": "",
+          "description": "The exact User-Agent of the browser the cf_clearance cookie was copied from (F12 → Console → navigator.userAgent). The cookie is only honored when the UA matches."
         }
       }
     }

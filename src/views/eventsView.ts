@@ -40,7 +40,7 @@ export class EventsView implements vscode.TreeDataProvider<EventNode | MatchNode
     if (element instanceof EventNode) {
       try {
         const matches = sortMatches(await api.getEventMatches(element.event.id));
-        element.children = matches.map((m) => new MatchNode(m));
+        element.children = matches.map((m) => new MatchNode(m, (n) => this._onDidChangeTreeData.fire(n)));
         return element.children;
       } catch (e) {
         return [errorItem(e)];
@@ -57,7 +57,7 @@ export class EventsView implements vscode.TreeDataProvider<EventNode | MatchNode
   }
 
   public async refresh(): Promise<void> {
-    await api.clearListCaches();
+    await api.clearAllCaches();
     this._onDidChangeTreeData.fire(undefined);
   }
 }

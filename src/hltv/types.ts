@@ -42,7 +42,7 @@ export interface ResultMatch {
   score1: string;
   score2: string;
   event: EventRef;
-  dayStart: number | null; // epoch ms of the results-day header
+  startTime: number | null; // epoch ms — per-row data-zonedgrouping-entry-unix
   format: string;
   stars: number;
 }

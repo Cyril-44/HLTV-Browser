@@ -9,7 +9,8 @@
 1. **朴实无华**：不使用任何自定义背景与装饰性图标（无 AK 图标、无花哨配色），详情页使用 VSCode 主题原生观感，只展示 HLTV 页面上能看到的信息。
 2. **文字优先、媒体按需**：默认不发任何图片 / 第三方嵌入（Twitch、X、Spotify……）请求，仅显示文字说明；用户手动点击后才加载，再次点击可关闭。
 3. **时间可信**：HLTV 页面上的时间文本随请求方所在时区变化，因此一律解析页面 `data-unix` / JSON 中的绝对时间戳（epoch），在扩展内转换为用户本地时区显示。
-4. **轻量克制**：列表带 TTL 缓存；实时轮询只服务于"正在看"的内容（展开中的卡片 / 打开中的详情页），折叠或关闭即停止。
+4. **轻量克制**：页面缓存为会话快照（抓一次用到手动刷新）；scorebot 实时流只服务于"正在看"的内容（展开中的卡片 / 打开中的详情页），折叠或关闭即退订。
+5. **一页一抓**：每个页面一个会话内至多抓取一次，之后全部走缓存；只有用户点击刷新按钮才会清空缓存重新抓取（沿用初代项目验证过的请求模型，从不触发 Cloudflare 风控）。侧栏仅抓取标题所需的列表页，展开某一项时才抓取该项对应的详情页。
 
 ## 功能大纲
 
@@ -28,9 +29,10 @@ HLTV
 ### Matches（比赛）
 
 - 列表项标题：`战队A - 战队B`，附**本地时区**的开始时间与赛事名。
-- **单击展开详情卡片**（树内子节点）：
-  - 赛制（BO1 / BO3 / BO5）、开始时间、地图、赛事名；
-  - 进行中的比赛：卡片内**实时更新比分**（轮询驱动）。
+- **单击展开详情卡片**（树内子节点，展开时才抓取该场比赛页）：
+  - 赛制（如 `Best of 3 (LAN)`）、阶段（如 Upper bracket quarter-final）、开始时间、赛事名；
+  - 地图列表与各图比分（含半场分，如 `Nuke 8 - 13 (7:5;1:8)`）、BP 步数；
+  - 进行中的比赛：卡片内**实时更新比分**（scorebot 驱动）。
 - **右键菜单**：
   - `打开详细页面` —— 在 VSCode 编辑器区域打开比赛详情页；
   - `在 HLTV 打开` —— 用系统浏览器打开对应 `hltv.org` 链接。
@@ -75,7 +77,7 @@ HLTV
 │  views/（四个树视图）      detail/（编辑器内 webview 详情页）          │
 │      │                        │                                    │
 │      └──────────┬─────────────┘                                    │
-│             hltv/ 数据层（api + 解析器 + TTL 缓存）                   │
+│             hltv/ 数据层（api + 解析器 + 会话快照缓存）                │
 │                 │                                                  │
 │             engine.ts 浏览器引擎（playwright-core + 系统浏览器）      │
 │                 │                                                  │
@@ -83,9 +85,10 @@ HLTV
 └────────────────────────── hltv.org ───────────────────────────────┘
 ```
 
-- **浏览器引擎而非 HTTP 客户端**：HLTV 全站（除 RSS）按 TLS 指纹拦截非浏览器请求（实测 plain fetch / curl / got-scraping 全部 403），因此数据层基于 `playwright-core`（约 14MB 纯 JS，**不打包浏览器**）驱动系统已装的 Edge / Chrome / Chromium（可在设置 `hltv.browserPath` 指定），Windows 用户零额外下载。引擎隐藏自动化特征（webdriver 标记等）、串行导航并限速、带 CF 挑战等待与重试梯度、列表 TTL 缓存。
+- **浏览器引擎而非 HTTP 客户端**：HLTV 全站（除 RSS）按 TLS 指纹拦截非浏览器请求（实测 plain fetch / curl / got-scraping 全部 403），因此数据层基于 `playwright-core`（约 14MB 纯 JS，**不打包浏览器**）驱动系统已装的 Edge / Chrome / Chromium（可在设置 `hltv.browserPath` 指定），Windows 用户零额外下载。引擎隐藏自动化特征（webdriver 标记等）、串行导航并保持礼貌间隔、带 CF 挑战等待与重试梯度；页面缓存为会话级快照（抓一次用到手动刷新为止）。
 - **scorebot 直连**：实时比分/击杀流/选手实时数据通过 HLTV 自家的 socket.io（`scorebot-lb.hltv.org`，Engine.IO v4 polling 传输）订阅 —— 以页面上下文 fetch 发起（CORS 放行），单场用 `readyForMatch`、列表用 `readyForScores`。
-- **实时按需**：树节点展开或详情页打开时才订阅，折叠 / 关闭即退订。
+- **一页一抓**：页面一个会话内至多抓一次，缓存用到手动刷新；导航全串行且保持 ~1.5s 礼貌间隔。
+- **实时按需**：树节点展开或详情页打开时才订阅 scorebot，折叠 / 关闭即退订（scorebot 走独立 socket，不产生页面请求）。
 - **媒体策略集中实现**：webview 统一输出占位符，点击加载、再点关闭。
 
 ### 目录结构（实际实现）
@@ -95,8 +98,8 @@ src/
   extension.ts              # 入口：视图注册、命令、菜单
   hltv/
     engine.ts               # playwright-core 浏览器引擎（挑战重试/限速/资源拦截）
-    api.ts                  # 高层 API（TTL 缓存包装）
-    cache.ts                # 带 in-flight 去重的 TTL 缓存
+    api.ts                  # 高层 API（会话快照缓存，手动刷新清空）
+    cache.ts                # 带 in-flight 去重的快照缓存
     scorebot.ts             # Engine.IO v4 polling 客户端（score/log/scoreboard）
     types.ts                # 领域模型
     parse/
@@ -125,7 +128,7 @@ docs/research-notes.md      # HLTV 页面结构与 scorebot 协议研究笔记
 
 | 议题 | 决策 |
 | --- | --- |
-| 反爬 | Cloudflare 按 TLS 指纹拦截 → playwright-core + 系统浏览器（真 Chromium TLS 栈）；导航限速 + 挑战重试梯度 + TTL 缓存 |
+| 反爬 | Cloudflare 按 TLS 指纹拦截 → playwright-core + 系统浏览器（真 Chromium TLS 栈）；导航串行 + 礼貌间隔 + 挑战重试梯度 + **会话级快照缓存（仅手动刷新清空）** |
 | 时区 | 只解析 `data-unix` / epoch，本地渲染（HLTV 显示文本随请求方地理/时区设置变化，不可信） |
 | 实时数据 | scorebot socket.io polling：`score`（比分/半场/胜负）、`log`（击杀流，如 `ZywOo 击杀 mo0N [ak47] (HS)`）、`scoreboard`（选手实时 $/K/A/D/ADR/存活） |
 | 选手统计 | 传统值与 Eco 调整值都在服务端 HTML 中（显隐切换）；T/CT 侧数据按需抓取 Detailed stats 子页 |
@@ -148,13 +151,21 @@ docs/research-notes.md      # HLTV 页面结构与 scorebot 协议研究笔记
 
 ## 使用前提
 
-扩展需要一个 Chromium 系浏览器用于抓取（Cloudflare TLS 指纹要求）：
+扩展需要一个 Chromium 系浏览器用于抓取（Cloudflare TLS 指纹要求），按以下顺序自动发现：
 
-1. 系统装有 **Microsoft Edge** 或 **Google Chrome**（Windows/macOS 常见，自动发现）；或
-2. 设置 `hltv.browserPath` 指向任意 Chromium 系浏览器可执行文件；或
-3. 本地已有 Playwright 管理的 Chromium（`~/.cache/ms-playwright`）。
+1. 设置 `hltv.browserPath` 指定的浏览器；
+2. 系统 **Microsoft Edge** / **Google Chrome**（Windows/macOS 常见）；
+3. **Chrome for Testing**（`npx @puppeteer/browsers install chrome@stable` 安装，自动扫描 `~/.cache/puppeteer` 与 `~/chrome`，取最新版本）；
+4. Playwright 管理的 Chromium（`~/.cache/ms-playwright`）。
 
-频繁大量访问可能触发 Cloudflare 对本机 IP 的临时风控（挑战循环数分钟），扩展已内置限速与缓存以降低概率，等待即可恢复。
+频繁大量访问可能触发 Cloudflare 对本机 IP 的临时风控。此时扩展会先走自动重试梯度（同页 reload → 换新上下文）；若挑战仍不消解（IP 级标记），会**自动弹出浏览器窗口**（干净配置：无自动化标志、真实 UA），请在其中完成 Cloudflare 人机验证 —— 通过后窗口自动关闭，`cf_clearance` cookie 连同验证时的 UA 一起注入回无头引擎并继续加载（cookie 与 UA 绑定，必须成对使用）。无图形界面的环境（纯 SSH 等）无法弹窗。
+
+若 IP 已进入"挑战循环"（连真人验证也立即失效），两条路：
+
+1. **等待冷却**（通常数小时至一天）；
+2. **逃生通道**：用日常浏览器（信誉良好、可正常打开 hltv.org，且与扩展共用同一公网 IP）复制通行证：
+   - F12 → Application（应用）→ Cookies → `https://www.hltv.org` → 复制 `cf_clearance` 的值 → 填入设置 `hltv.cfClearance`；
+   - F12 → Console 输入 `navigator.userAgent` → 复制完整 UA 串 → 填入设置 `hltv.userAgent`（两者必须来自同一浏览器，cookie 只在 UA 匹配时有效）。
 
 ## 开发
 

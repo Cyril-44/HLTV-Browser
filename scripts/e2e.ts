@@ -22,6 +22,10 @@ async function main(): Promise<void> {
   const events = await api.getEvents();
   console.log(`events: ${events.length} (big: ${events.filter((e) => e.big).length}); first big: ${events.find((e) => e.big)?.name}`);
 
+  console.log('=== getEventMatches (starladder drill-down) ===');
+  const eventMatches = await api.getEventMatches(8057);
+  console.log(`event matches: ${eventMatches.length}; sample: ${eventMatches[0] ? `${eventMatches[0].team1.name} vs ${eventMatches[0].team2.name} (${eventMatches[0].live ? 'LIVE' : 'upcoming'})` : 'none'}`);
+
   console.log('=== getNews ===');
   const news = await api.getNews();
   console.log(`news: ${news.length}; first: ${news[0]?.title.slice(0, 60)}`);
@@ -34,6 +38,15 @@ async function main(): Promise<void> {
     console.log(`vetoes: ${detail.vetoes.length}; maps: ${detail.maps.map((m) => `${m.name} ${m.score1}-${m.score2}`).join(', ')}`);
     console.log(`statMaps: ${detail.statMaps.map((m) => m.name).join(',')}; stats tables: ${Object.keys(detail.stats).map((k) => `${k}=${detail.stats[k].length}`).join(',')}`);
     console.log(`scorebot: ${JSON.stringify(detail.scorebot)}`);
+  } else if (results[0]) {
+    console.log('=== getMatchDetail (finished) ===');
+    const detail = await api.getMatchDetail(results[0].url);
+    console.log(`${detail.team1.name} vs ${detail.team2.name} | live=${detail.live} | ${detail.format} | ${detail.event.name}`);
+    console.log(`vetoes: ${detail.vetoes.length}; maps: ${detail.maps.map((m) => `${m.name} ${m.score1}-${m.score2}${m.halves}`).join(', ')}`);
+    const statKey = detail.statMaps[1]?.id ?? 'all';
+    const table = detail.stats[statKey]?.[0];
+    console.log(`stats[${statKey}] ${table?.team}: ${table?.rows.length} players; first: ${table?.rows[0]?.nick} ${table?.rows[0]?.kd} rating ${table?.rows[0]?.rating}`);
+    console.log(`lineups: ${detail.lineups.map((l) => `${l.team}(${l.players.length})`).join(', ')}`);
   }
 
   console.log('=== getEventDetail (starladder) ===');

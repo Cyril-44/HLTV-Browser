@@ -34,7 +34,7 @@ export class NewsView implements vscode.TreeDataProvider<NewsNode | vscode.TreeI
   }
 
   public async refresh(): Promise<void> {
-    await api.clearListCaches();
+    await api.clearAllCaches();
     this._onDidChangeTreeData.fire(undefined);
   }
 }

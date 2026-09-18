@@ -179,14 +179,33 @@ function parseLineups($: CheerioAPI): { team: string; players: LineupPlayer[] }[
       continue;
     }
     const players: LineupPlayer[] = [];
-    for (const pc of $box.find('.player-compare')) {
-      const $pc = $(pc);
-      const fullName = ($pc.attr('title') || $pc.find('img').attr('title') || $pc.find('img').attr('alt') || '').replace(/\s+/g, ' ').trim();
+    // Finished-match layout: td.player > a[href^="/player/"] with the full
+    // name on the bodyshot img's title attribute.
+    for (const a of $box.find('a[href^="/player/"]')) {
+      const $a = $(a);
+      const fullName = (
+        $a.find('img[title]').first().attr('title') ||
+        $a.find('img').first().attr('alt') ||
+        $a.text() ||
+        ''
+      ).replace(/\s+/g, ' ').trim();
       if (!fullName) {
         continue;
       }
       const quoted = /'([^']+)'/.exec(fullName);
       players.push({ nick: quoted?.[1] ?? fullName, fullName });
+    }
+    // Live-match layout: .player-compare containers carry the name on title.
+    if (!players.length) {
+      for (const pc of $box.find('.player-compare')) {
+        const $pc = $(pc);
+        const fullName = ($pc.attr('title') || $pc.find('img').attr('title') || $pc.find('img').attr('alt') || '').replace(/\s+/g, ' ').trim();
+        if (!fullName) {
+          continue;
+        }
+        const quoted = /'([^']+)'/.exec(fullName);
+        players.push({ nick: quoted?.[1] ?? fullName, fullName });
+      }
     }
     if (players.length) {
       lineups.push({ team, players });

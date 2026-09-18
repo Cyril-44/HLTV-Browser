@@ -30,7 +30,7 @@ const results = parseResultsPage(read('results.html'));
 summary(`results (${results.length})`, {
   first: results.slice(0, 4),
   noEvent: results.filter((r) => !r.event.name).length,
-  noDay: results.filter((r) => !r.dayStart).length,
+  noTime: results.filter((r) => !r.startTime).length,
 });
 
 const events = parseEventsPage(read('events.html'));

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { Match, LiveScore } from '../hltv/types';
+import * as api from '../hltv/api';
+import { Match, LiveScore, MatchDetail } from '../hltv/types';
 import { scorebot } from '../hltv/scorebot';
 import { formatMatchTime } from '../util/time';
 
@@ -8,6 +9,43 @@ export class CardRow extends vscode.TreeItem {
   constructor(label: string, value: string) {
     super(`${label}:  ${value}`, vscode.TreeItemCollapsibleState.None);
     this.contextValue = 'hltv-card';
+  }
+}
+
+/**
+ * Lazy per-item detail loader: the sidebar only fetches list pages up front;
+ * a match page is fetched when its row is expanded, never in bulk.
+ */
+export class LazyMatchDetail {
+  public detail: MatchDetail | null = null;
+  public state: 'idle' | 'loading' | 'ready' | 'error' = 'idle';
+  private lastAttempt = 0;
+
+  public constructor(
+    private readonly url: string,
+    private readonly onChanged: () => void,
+  ) {}
+
+  public ensure(): void {
+    const now = Date.now();
+    if (this.state === 'loading' || this.state === 'ready') {
+      return;
+    }
+    if (this.state === 'error' && now - this.lastAttempt < 5000) {
+      return; // avoid reload loops when the tree re-renders an error card
+    }
+    this.lastAttempt = now;
+    this.state = 'loading';
+    api
+      .getMatchDetail(this.url)
+      .then((d) => {
+        this.detail = d;
+        this.state = 'ready';
+      })
+      .catch(() => {
+        this.state = 'error';
+      })
+      .finally(() => this.onChanged());
   }
 }
 
@@ -55,20 +93,23 @@ export function liveScoreText(match: Match): string | null {
 }
 
 export class MatchNode extends vscode.TreeItem {
-  constructor(public match: Match) {
+  public lazy: LazyMatchDetail;
+
+  constructor(public match: Match, onCardRefresh?: (node: MatchNode) => void) {
     super('', vscode.TreeItemCollapsibleState.Collapsed);
     this.contextValue = 'hltv-match';
+    this.lazy = new LazyMatchDetail(match.url, () => onCardRefresh?.(this));
     this.rebuild();
   }
 
   public rebuild(): void {
     const { team1, team2 } = this.match;
-    this.label = this.match.live
-      ? `${team1.name} - ${team2.name}`
-      : `${team1.name} - ${team2.name}`;
+    this.label = `${team1.name} - ${team2.name}`;
     const bits: string[] = [];
     if (this.match.live) {
       bits.push('● LIVE');
+    } else if (this.match.startTime) {
+      bits.push(formatMatchTime(this.match.startTime));
     }
     if (this.match.format) {
       bits.push(this.match.format.toUpperCase());
@@ -87,36 +128,64 @@ export class MatchNode extends vscode.TreeItem {
   }
 
   public children(): CardRow[] {
-    const rows: CardRow[] = [];
+    this.lazy.ensure();
     const m = this.match;
+    const rows: CardRow[] = [];
+
     if (m.live) {
       rows.push(new CardRow('状态', 'LIVE'));
     } else if (m.startTime) {
       rows.push(new CardRow('时间', formatMatchTime(m.startTime)));
     }
-    if (m.format) {
-      rows.push(new CardRow('赛制', m.format.toUpperCase()));
-    }
     if (m.event.name) {
       rows.push(new CardRow('赛事', m.event.name));
     }
-    if (m.lan) {
-      rows.push(new CardRow('类型', 'LAN'));
-    }
     if (m.live) {
-      const score = liveScoreText(m);
-      rows.push(new CardRow('比分', score ?? '等待数据…'));
+      rows.push(new CardRow('比分', liveScoreText(m) ?? '等待数据…'));
     }
-    const live = liveScoreOf(m);
-    if (live && m.team1.id && m.team2.id) {
-      for (const map of [...live.maps].sort((a, b) => a.ordinal - b.ordinal)) {
-        rows.push(
-          new CardRow(
-            map.over ? `地图 ${map.name}` : `地图 ${map.name}(进行中)`,
-            `${map.scores[m.team1.id!] ?? 0} - ${map.scores[m.team2.id!] ?? 0}`,
-          ),
-        );
+
+    const d = this.lazy.detail;
+    if (!d) {
+      // Detail page not fetched yet: show what the list already gave us.
+      if (this.lazy.state === 'loading') {
+        rows.push(new CardRow('详情', '加载中…'));
+      } else if (this.lazy.state === 'error') {
+        rows.push(new CardRow('详情', '加载失败，收起后重新展开重试'));
       }
+      if (m.format) {
+        rows.push(new CardRow('赛制', m.format.toUpperCase()));
+      }
+      if (m.lan) {
+        rows.push(new CardRow('类型', 'LAN'));
+      }
+      const live = liveScoreOf(m);
+      if (live && m.team1.id && m.team2.id) {
+        for (const map of [...live.maps].sort((a, b) => a.ordinal - b.ordinal)) {
+          rows.push(
+            new CardRow(
+              `地图 ${map.name}${map.over ? '' : '(进行中)'}`,
+              `${map.scores[m.team1.id!] ?? 0} - ${map.scores[m.team2.id!] ?? 0}`,
+            ),
+          );
+        }
+      }
+      return rows;
+    }
+
+    // Detail page loaded — the card mirrors the match page content.
+    if (d.format) {
+      rows.push(new CardRow('赛制', d.format));
+    }
+    if (d.stage) {
+      rows.push(new CardRow('阶段', d.stage));
+    }
+    for (const map of d.maps) {
+      const played = map.score1 !== '-' && map.score2 !== '-';
+      const score = played ? `${map.score1} - ${map.score2}${map.halves ? ` ${map.halves}` : ''}` : '未开始';
+      rows.push(new CardRow(`地图 ${map.name}`, score));
+    }
+    if (d.vetoes.length) {
+      rows.push(new CardRow('BP', `${d.vetoes.length} 步（详见详情页）`));
     }
     return rows;
   }

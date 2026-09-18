@@ -16,6 +16,8 @@ import { openNewsDetail } from './detail/newsPage';
 const HLTV_ORIGIN = 'https://www.hltv.org';
 
 export function activate(context: vscode.ExtensionContext): void {
+  engine.setStoragePath(context.globalStorageUri.fsPath);
+
   const matchesView = new MatchesView();
   const resultsView = new ResultsView();
   const eventsView = new EventsView();

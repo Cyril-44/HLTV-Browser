@@ -39,7 +39,7 @@ export class MatchesView implements vscode.TreeDataProvider<MatchNode | vscode.T
       const next = new Map<number, MatchNode>();
       for (const m of matches) {
         const existing = this.nodes.get(m.id);
-        const node = existing ? Object.assign(existing, { match: m }) : new MatchNode(m);
+        const node = existing ? Object.assign(existing, { match: m }) : new MatchNode(m, (n) => this._onDidChangeTreeData.fire(n));
         node.rebuild();
         next.set(m.id, node);
         if (m.live) {
@@ -56,7 +56,7 @@ export class MatchesView implements vscode.TreeDataProvider<MatchNode | vscode.T
   }
 
   public async refresh(): Promise<void> {
-    await api.clearListCaches();
+    await api.clearAllCaches();
     this._onDidChangeTreeData.fire(undefined);
   }
 }

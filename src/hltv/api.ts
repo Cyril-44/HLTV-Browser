@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import * as cheerio from 'cheerio';
 import { engine } from './engine';
 import { TtlCache } from './cache';
@@ -8,33 +7,44 @@ import { parseEventsPage } from './parse/events';
 import { parseMatchPage } from './parse/matchPage';
 import { parseEventPage } from './parse/eventPage';
 import { parseNewsList, parseNewsArticle } from './parse/news';
+
 import { Match, ResultMatch, EventSummary, EventDetail, MatchDetail, NewsItem, NewsDetail, SideStatsTable, StatRow, StatsTable } from './types';
 
 const BASE = 'https://www.hltv.org';
 
-function listCache<T>(): TtlCache<T> {
-  const seconds = vscode.workspace.getConfiguration('hltv').get<number>('listCacheSeconds', 60);
-  return new TtlCache<T>(Math.max(5, seconds) * 1000);
+/**
+ * Session snapshot cache: a page is fetched at most once per VSCode session
+ * and reused forever — exactly the request pattern of the original extension
+ * that never tripped Cloudflare. Manual refresh (refresh commands) is the
+ * only path that clears these.
+ */
+function snapshotCache<T>(): TtlCache<T> {
+  return new TtlCache<T>(Number.POSITIVE_INFINITY);
 }
 
 const caches = {
-  matches: listCache<Match[]>(),
-  results: listCache<ResultMatch[]>(),
-  events: listCache<EventSummary[]>(),
+  matches: snapshotCache<Match[]>(),
+  results: snapshotCache<ResultMatch[]>(),
+  events: snapshotCache<EventSummary[]>(),
   eventMatches: new Map<number, TtlCache<Match[]>>(),
-  matchDetail: new TtlCache<MatchDetail>(15_000),
-  eventDetail: new TtlCache<EventDetail>(60_000),
-  news: listCache<NewsItem[]>(),
-  newsDetail: new TtlCache<NewsDetail>(30_000),
-  sideStats: new TtlCache<SideStatsTable[]>(120_000),
+  matchDetail: snapshotCache<MatchDetail>(),
+  eventDetail: snapshotCache<EventDetail>(),
+  news: snapshotCache<NewsItem[]>(),
+  newsDetail: snapshotCache<NewsDetail>(),
+  sideStats: snapshotCache<SideStatsTable[]>(),
 };
 
-export function clearListCaches(): void {
+/** Manual refresh: forget every fetched page so the next load refetches. */
+export function clearAllCaches(): void {
   caches.matches.clear();
   caches.results.clear();
   caches.events.clear();
   caches.eventMatches.clear();
+  caches.matchDetail.clear();
+  caches.eventDetail.clear();
   caches.news.clear();
+  caches.newsDetail.clear();
+  caches.sideStats.clear();
 }
 
 async function html(path: string): Promise<string> {
@@ -43,11 +53,13 @@ async function html(path: string): Promise<string> {
 }
 
 export function getMatches(): Promise<Match[]> {
-  return caches.matches.wrap('matches', async () => parseMatchesPage(await html('/matches')));
+  return caches.matches.wrap('matches', async () =>
+    parseMatchesPage(await html('/matches')));
 }
 
 export function getResults(): Promise<ResultMatch[]> {
-  return caches.results.wrap('results', async () => parseResultsPage(await html('/results')));
+  return caches.results.wrap('results', async () =>
+    parseResultsPage(await html('/results')));
 }
 
 export function getEvents(): Promise<EventSummary[]> {
@@ -66,26 +78,31 @@ export function getEvents(): Promise<EventSummary[]> {
 export function getEventMatches(eventId: number): Promise<Match[]> {
   let cache = caches.eventMatches.get(eventId);
   if (!cache) {
-    cache = listCache<Match[]>();
+    cache = snapshotCache<Match[]>();
     caches.eventMatches.set(eventId, cache);
   }
-  return cache.wrap(String(eventId), async () => parseMatchesPage(await html(`/matches?event=${eventId}`)));
+  return cache.wrap(String(eventId), async () =>
+    parseMatchesPage(await html(`/events/${eventId}/matches`)));
 }
 
 export function getMatchDetail(path: string): Promise<MatchDetail> {
-  return caches.matchDetail.wrap(path, async () => parseMatchPage(await html(path), path));
+  return caches.matchDetail.wrap(path, async () =>
+    parseMatchPage(await html(path), path));
 }
 
 export function getEventDetail(path: string): Promise<EventDetail> {
-  return caches.eventDetail.wrap(path, async () => parseEventPage(await html(path), path));
+  return caches.eventDetail.wrap(path, async () =>
+    parseEventPage(await html(path), path));
 }
 
 export function getNews(): Promise<NewsItem[]> {
-  return caches.news.wrap('news', async () => parseNewsList(await html('/')));
+  return caches.news.wrap('news', async () =>
+    parseNewsList(await html('/')));
 }
 
 export function getNewsDetail(path: string): Promise<NewsDetail> {
-  return caches.newsDetail.wrap(path, async () => parseNewsArticle(await html(path), path));
+  return caches.newsDetail.wrap(path, async () =>
+    parseNewsArticle(await html(path), path));
 }
 
 /** Per-side (Both/T/CT) player stats from the match page's "Detailed stats" sub-page. */
