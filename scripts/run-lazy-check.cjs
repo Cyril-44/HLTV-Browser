@@ -78,7 +78,7 @@ const vscodeStub = {
   },
   commands: { registerCommand: () => ({ dispose() {} }), executeCommand: async () => undefined },
   workspace: { getConfiguration: () => ({ get: (_k, d) => d }) },
-  env: { openExternal: async () => true },
+  env: { openExternal: async () => true, language: 'zh-cn' },
   Uri: { parse: (u) => u },
   ViewColumn: { Active: 1 },
   ProgressLocation: { Notification: 15 },

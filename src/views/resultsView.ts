@@ -3,6 +3,7 @@ import * as api from '../hltv/api';
 import { ResultMatch } from '../hltv/types';
 import { formatMatchTime } from '../util/time';
 import { CardRow, LazyMatchDetail } from './common';
+import { t } from '../i18n';
 import { errorItem } from './matchesView';
 
 export class ResultNode extends vscode.TreeItem {
@@ -30,35 +31,35 @@ export class ResultNode extends vscode.TreeItem {
     const rows: vscode.TreeItem[] = [];
     const r = this.result;
     if (r.startTime) {
-      rows.push(new CardRow('时间', formatMatchTime(r.startTime)));
+      rows.push(new CardRow(t('card.time'), formatMatchTime(r.startTime)));
     }
     if (r.event.name) {
-      rows.push(new CardRow('赛事', r.event.name));
+      rows.push(new CardRow(t('card.event'), r.event.name));
     }
 
     const d = this.lazy.detail;
     if (!d) {
       if (this.lazy.state === 'loading') {
-        rows.push(new CardRow('详情', '加载中…'));
+        rows.push(new CardRow(t('card.detail'), t('card.loading')));
       } else if (this.lazy.state === 'error') {
-        rows.push(new CardRow('详情', '加载失败，收起后重新展开重试'));
+        rows.push(new CardRow(t('card.detail'), t('card.loadFailedRetry')));
       }
       if (r.format) {
-        rows.push(new CardRow('赛制', r.format.toUpperCase()));
+        rows.push(new CardRow(t('card.format'), r.format.toUpperCase()));
       }
       return rows;
     }
 
     if (d.format) {
-      rows.push(new CardRow('赛制', d.format));
+      rows.push(new CardRow(t('card.format'), d.format));
     }
     if (d.stage) {
-      rows.push(new CardRow('阶段', d.stage));
+      rows.push(new CardRow(t('card.stage'), d.stage));
     }
     for (const map of d.maps) {
       const played = map.score1 !== '-' && map.score2 !== '-';
       const score = played ? `${map.score1} - ${map.score2}${map.halves ? ` ${map.halves}` : ''}` : '—';
-      rows.push(new CardRow(`地图 ${map.name}`, score));
+      rows.push(new CardRow(`${t('card.map')} ${map.name}`, score));
     }
     return rows;
   }

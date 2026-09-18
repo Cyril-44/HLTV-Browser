@@ -1,0 +1,19 @@
+{
+  "container.title": "HLTV",
+  "view.matches": "比赛",
+  "view.results": "赛果",
+  "view.events": "赛事",
+  "view.news": "新闻",
+  "cmd.refreshMatches": "HLTV: 刷新比赛",
+  "cmd.refreshResults": "HLTV: 刷新赛果",
+  "cmd.refreshEvents": "HLTV: 刷新赛事",
+  "cmd.refreshNews": "HLTV: 刷新新闻",
+  "cmd.openMatchDetail": "HLTV: 打开比赛详情",
+  "cmd.openEventDetail": "HLTV: 打开赛事详情",
+  "cmd.openNewsDetail": "HLTV: 打开新闻文章",
+  "cmd.openOnHLTV": "HLTV: 在 HLTV.org 打开",
+  "config.proxyServer": "访问 hltv.org 与 challenges.cloudflare.com 所用的代理，例如 `http://127.0.0.1:7890`。必须与你能正常打开 HLTV 的浏览器走同一网络路径，否则 Cloudflare 验证会无限循环。留空时回退到 `HTTPS_PROXY`/`HTTP_PROXY` 环境变量。",
+  "config.browserPath": "用于抓取 HLTV 页面的 Chromium 系浏览器可执行文件路径（Chrome / Edge / Chromium）。留空自动检测：Edge → Chrome → Chrome for Testing → Playwright 管理的 Chromium。",
+  "config.cfClearance": "IP 被硬标记时的逃生通道：从能正常打开 hltv.org 的日常浏览器复制 `cf_clearance` cookie 值（F12 → 应用 → Cookie）。必须与同一浏览器的 `hltv.userAgent` 配对使用，且该浏览器与本机共用公网 IP。",
+  "config.userAgent": "复制 cf_clearance 的那个浏览器的完整 User-Agent（F12 → 控制台 → navigator.userAgent）。UA 匹配时 cookie 才有效。"
+}

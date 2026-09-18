@@ -3,6 +3,7 @@ import * as api from '../hltv/api';
 import { NewsDetail, NewsBlock } from '../hltv/types';
 import { PanelRegistry, shellHtml, escapeHtml } from './webviewCommon';
 import { formatDateTime } from '../util/time';
+import { t, webviewStrings } from '../i18n';
 
 const registry = new PanelRegistry();
 
@@ -29,18 +30,18 @@ class NewsDetailPage {
 
   public async load(): Promise<void> {
     try {
-      this.panel.webview.html = shellHtml('加载中…', '<h1 class="meta">正在加载新闻页面…</h1>', this.panel.webview.cspSource);
+      this.panel.webview.html = shellHtml(t('web.loading'), `<h1 class="meta">${t('news.loadingPage')}</h1>`, this.panel.webview.cspSource);
       const d = await api.getNewsDetail(this.url);
       this.panel.title = d.title.slice(0, 40);
       this.render(d);
     } catch (e) {
-      this.panel.webview.html = shellHtml('加载失败', `<h1>加载失败</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource);
+      this.panel.webview.html = shellHtml(t('page.loadFailed'), `<h1>${t('page.loadFailed')}</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource);
     }
   }
 
   private render(d: NewsDetail): void {
     const parts: string[] = [];
-    parts.push(`<button id="mediaToggle" class="media-toggle" data-on="0">加载媒体</button>`);
+    parts.push(`<button id="mediaToggle" class="media-toggle" data-on="0">${t('news.loadMedia')}</button>`);
     parts.push(`<h1>${escapeHtml(d.title)}</h1>`);
     parts.push(
       `<p class="meta">${[d.author, d.date ? formatDateTime(d.date) : ''].filter(Boolean).map(escapeHtml).join(' · ')}</p>`,
@@ -52,26 +53,26 @@ class NewsDetailPage {
     for (const block of d.blocks) {
       switch (block.kind) {
         case 'text':
-          parts.push(`<p>${escapeHtml(block.text)}${block.link ? ` <a href="#" class="extlink" data-url="${escapeHtml(block.link)}">[链接]</a>` : ''}</p>`);
+          parts.push(`<p>${escapeHtml(block.text)}${block.link ? ` <a href="#" class="extlink" data-url="${escapeHtml(block.link)}">[${t('news.link')}]</a>` : ''}</p>`);
           break;
         case 'quote':
           parts.push(`<blockquote>${escapeHtml(block.text)}</blockquote>`);
           break;
         case 'image':
           parts.push(
-            `<div class="media-slot" data-kind="image" data-src="${escapeHtml(block.src)}"><span class="placeholder">[图片${block.label ? `：${escapeHtml(block.label)}` : ''}]</span></div>`,
+            `<div class="media-slot" data-kind="image" data-src="${escapeHtml(block.src)}"><span class="placeholder">[${t('news.image')}${block.label ? `：${escapeHtml(block.label)}` : ''}]</span></div>`,
           );
           break;
         case 'embed':
           parts.push(
-            `<div class="media-slot" data-kind="embed" data-src="${escapeHtml(block.src)}" data-provider="${escapeHtml(block.provider)}"><span class="placeholder">[嵌入: ${escapeHtml(block.provider)}]</span></div>`,
+            `<div class="media-slot" data-kind="embed" data-src="${escapeHtml(block.src)}" data-provider="${escapeHtml(block.provider)}"><span class="placeholder">[${t('news.embed', { p: escapeHtml(block.provider) })}]</span></div>`,
           );
           break;
       }
     }
 
     if (d.comments.length) {
-      parts.push(`<hr/><h2>评论 <span class="sub">(${d.comments.length})</span></h2>`);
+      parts.push(`<hr/><h2>${t('news.comments')} <span class="sub">(${d.comments.length})</span></h2>`);
       for (const c of d.comments) {
         parts.push(
           `<div class="comment" style="margin-left:${c.depth * 22}px">` +
@@ -82,13 +83,14 @@ class NewsDetailPage {
     }
 
     const script = `
+const STR = ${JSON.stringify(webviewStrings())};
 // One toggle in the top-right corner controls ALL media: load everything at
 // once, or tear everything down again (iframes are destroyed, not hidden).
 document.getElementById('mediaToggle').addEventListener('click', (e) => {
   const btn = e.currentTarget;
   const turnOn = btn.dataset.on !== '1';
   btn.dataset.on = turnOn ? '1' : '0';
-  btn.textContent = turnOn ? '关闭媒体' : '加载媒体';
+  btn.textContent = turnOn ? STR.hideMedia : STR.loadMedia;
   btn.classList.toggle('active', turnOn);
   document.querySelectorAll('.media-slot').forEach(slot => {
     if (turnOn) {

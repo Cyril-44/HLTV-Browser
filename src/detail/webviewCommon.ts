@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { htmlLang } from '../i18n';
 
 /**
  * Shared plain-looking webview shell: VSCode theme variables only, no custom
@@ -6,7 +7,7 @@ import * as vscode from 'vscode';
  */
 export function shellHtml(title: string, body: string, cspSource: string): string {
   return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${htmlLang()}">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline'; frame-src https:;">

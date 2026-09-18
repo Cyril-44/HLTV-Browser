@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as api from '../hltv/api';
 import { scorebot } from '../hltv/scorebot';
 import { MatchNode, sortMatches } from './common';
+import { t } from '../i18n';
 
 export class MatchesView implements vscode.TreeDataProvider<MatchNode | vscode.TreeItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<MatchNode | undefined | void>();
@@ -62,7 +63,7 @@ export class MatchesView implements vscode.TreeDataProvider<MatchNode | vscode.T
 }
 
 export function errorItem(e: unknown): vscode.TreeItem {
-  const item = new vscode.TreeItem(`加载失败: ${String(e).split('\n')[0].slice(0, 120)}`);
+  const item = new vscode.TreeItem(t('view.loadError', { msg: String(e).split('\n')[0].slice(0, 120) }));
   item.iconPath = new vscode.ThemeIcon('error');
   item.contextValue = 'hltv-card';
   return item;

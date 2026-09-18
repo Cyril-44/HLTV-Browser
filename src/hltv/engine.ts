@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 import { chromium, Browser, BrowserContext, Cookie, Page } from 'playwright-core';
+import { t } from '../i18n';
 
 /**
  * Browser-backed fetch engine mirroring the request model of the original
@@ -348,17 +349,13 @@ class HltvEngine {
     );
     fs.mkdirSync(profileDir, { recursive: true });
 
-    void vscode.window.showInformationMessage(
-      'HLTV 被Cloudflare拦截：即将弹出浏览器窗口，请完成人机验证（验证通过后窗口会自动关闭并继续加载）。',
-    );
+    void vscode.window.showInformationMessage(t('cf.verifyPrompt'));
 
     let ctx: BrowserContext;
     try {
       ctx = await this.launchPersistentForVerification(profileDir);
     } catch (e) {
-      void vscode.window.showErrorMessage(
-        `无法打开 Cloudflare 验证窗口（当前环境可能没有图形界面）：${String(e).split('\n')[0]}`,
-      );
+      void vscode.window.showErrorMessage(t('cf.verifyWindowFail', { msg: String(e).split('\n')[0] }));
       return false;
     }
 
@@ -377,7 +374,7 @@ class HltvEngine {
       await ctx.close().catch(() => undefined);
     }
     if (!cleared) {
-      void vscode.window.showWarningMessage('Cloudflare 验证未完成（窗口被关闭或超时），稍后将再次尝试。');
+      void vscode.window.showWarningMessage(t('cf.verifyIncomplete'));
     }
     return cleared;
   }
@@ -514,11 +511,11 @@ class HltvEngine {
         errors.push(`${a.label}: ${String(e).split('\n')[0]}`);
       }
     }
-    const message = 'HLTV Browser cannot find a usable browser. Install Microsoft Edge or Google Chrome, or set "hltv.browserPath".';
+    const message = t('engine.noBrowser');
     if (!this.launchErrorShown) {
       this.launchErrorShown = true;
-      void vscode.window.showErrorMessage(message, 'Settings').then((choice) => {
-        if (choice === 'Settings') {
+      void vscode.window.showErrorMessage(message, t('engine.settings')).then((choice) => {
+        if (choice === t('engine.settings')) {
           void vscode.commands.executeCommand('workbench.action.openSettings', 'hltv.browserPath');
         }
       });

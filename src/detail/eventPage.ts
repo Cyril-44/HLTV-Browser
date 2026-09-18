@@ -3,6 +3,7 @@ import * as api from '../hltv/api';
 import { EventDetail } from '../hltv/types';
 import { PanelRegistry, shellHtml, escapeHtml } from './webviewCommon';
 import { formatDate } from '../util/time';
+import { t, webviewStrings } from '../i18n';
 import { openMatchDetail } from './matchPage';
 
 const registry = new PanelRegistry();
@@ -33,12 +34,12 @@ class EventDetailPage {
 
   public async load(): Promise<void> {
     try {
-      this.panel.webview.html = shellHtml('加载中…', '<h1 class="meta">正在加载赛事页面…</h1>', this.panel.webview.cspSource);
+      this.panel.webview.html = shellHtml(t('web.loading'), `<h1 class="meta">${t('event.loadingPage')}</h1>`, this.panel.webview.cspSource);
       const d = await api.getEventDetail(this.url);
       this.panel.title = d.name;
       this.render(d);
     } catch (e) {
-      this.panel.webview.html = shellHtml('加载失败', `<h1>加载失败</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource);
+      this.panel.webview.html = shellHtml(t('page.loadFailed'), `<h1>${t('page.loadFailed')}</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource);
     }
   }
 
@@ -50,7 +51,7 @@ class EventDetailPage {
         d.dateStart ? formatDate(d.dateStart) : '',
         d.dateEnd ? `— ${formatDate(d.dateEnd)}` : '',
         d.prize,
-        d.teamsCount ? `${escapeHtml(d.teamsCount)} 队` : '',
+        d.teamsCount ? escapeHtml(t('event.teamsCount', { n: d.teamsCount })) : '',
         d.location,
       ]
         .map((s) => (s ? escapeHtml(String(s)) : ''))
@@ -59,7 +60,7 @@ class EventDetailPage {
     );
 
     if (d.formats.length) {
-      parts.push('<h2>赛制</h2><table>');
+      parts.push(`<h2>${t('event.formats')}</h2><table>`);
       for (const f of d.formats) {
         parts.push(`<tr><th>${escapeHtml(f.name)}</th><td>${escapeHtml(f.value.replace(/\n/g, ' '))}</td></tr>`);
       }
@@ -83,12 +84,12 @@ class EventDetailPage {
     }
 
     if (d.swiss.length) {
-      parts.push('<h2>瑞士轮 <span class="sub">Swiss stage</span></h2>');
+      parts.push(`<h2>${t('event.swiss')}</h2>`);
       for (const col of d.swiss) {
         if (!col.matchups.length) {
           continue;
         }
-        parts.push(`<h3 class="meta">${escapeHtml(col.title || '')} (${col.matchups.length} 场)</h3>`);
+        parts.push(`<h3 class="meta">${escapeHtml(col.title || '')} (${col.matchups.length})</h3>`);
         for (const mu of col.matchups) {
           parts.push(`<p class="matchline">${escapeHtml(mu)}</p>`);
         }
@@ -96,27 +97,28 @@ class EventDetailPage {
     }
 
     if (d.teams.length) {
-      if (d.teams.some((t) => t.logo)) {
-        parts.push('<button id="logoToggle" class="media-toggle" data-on="0">加载战队图标</button>');
+      if (d.teams.some((team) => team.logo)) {
+        parts.push(`<button id="logoToggle" class="media-toggle" data-on="0">${t('event.loadLogos')}</button>`);
       }
-      parts.push('<h2>参赛战队 <span class="sub">图标默认不加载，右上角按钮统一开关</span></h2><div class="teamgrid">');
-      for (const t of d.teams) {
-        const ranks = [t.worldRank ? `HLTV ${t.worldRank}` : '', t.vrsRank ? `VRS ${t.vrsRank}` : ''].filter(Boolean).join(' / ');
+      parts.push(`<h2>${t('event.teams')} <span class="sub">${t('event.teamsSub')}</span></h2><div class="teamgrid">`);
+      for (const team of d.teams) {
+        const ranks = [team.worldRank ? `HLTV ${team.worldRank}` : '', team.vrsRank ? `VRS ${team.vrsRank}` : ''].filter(Boolean).join(' / ');
         parts.push(
-          `<div class="teamcell">${t.logo ? `<span class="logo-slot" data-src="${escapeHtml(t.logo)}"></span> ` : ''}<strong>${escapeHtml(t.name)}</strong>${ranks ? ` <span class="muted">${escapeHtml(ranks)}</span>` : ''}</div>`,
+          `<div class="teamcell">${team.logo ? `<span class="logo-slot" data-src="${escapeHtml(team.logo)}"></span> ` : ''}<strong>${escapeHtml(team.name)}</strong>${ranks ? ` <span class="muted">${escapeHtml(ranks)}</span>` : ''}</div>`,
         );
       }
       parts.push('</div>');
     }
 
     if (d.relatedEvents.length) {
-      parts.push('<h2>相关赛事</h2>');
+      parts.push(`<h2>${t('event.related')}</h2>`);
       for (const re of d.relatedEvents) {
         parts.push(`<p class="matchline"><a href="#" class="extlink" data-url="${escapeHtml(re.url)}">${escapeHtml(re.name)}</a></p>`);
       }
     }
 
     const script = `
+const STR = ${JSON.stringify(webviewStrings())};
 document.querySelectorAll('.matchlink').forEach(a => a.addEventListener('click', e => {
   e.preventDefault(); acquireVsCodeApi().postMessage({ type: 'openMatch', url: a.dataset.url });
 }));
@@ -128,7 +130,7 @@ document.getElementById('logoToggle')?.addEventListener('click', (e) => {
   const btn = e.currentTarget;
   const turnOn = btn.dataset.on !== '1';
   btn.dataset.on = turnOn ? '1' : '0';
-  btn.textContent = turnOn ? '关闭战队图标' : '加载战队图标';
+  btn.textContent = turnOn ? STR.hideLogos : STR.loadLogos;
   btn.classList.toggle('active', turnOn);
   document.querySelectorAll('.logo-slot').forEach(slot => {
     if (turnOn) {

@@ -2,7 +2,7 @@
   "name": "hltv-browser-vscode-extension",
   "displayName": "HLTV Browser",
   "description": "Browse HLTV matches, results, events and news inside VS Code",
-  "version": "0.2.3",
+  "version": "1.0.0",
   "publisher": "local",
   "engines": {
     "vscode": "^1.90.0"
@@ -22,7 +22,7 @@
       "activitybar": [
         {
           "id": "hltv",
-          "title": "HLTV",
+          "title": "%container.title%",
           "icon": "resources/icon.svg"
         }
       ]
@@ -31,58 +31,58 @@
       "hltv": [
         {
           "id": "hltv.matches",
-          "name": "Matches"
+          "name": "%view.matches%"
         },
         {
           "id": "hltv.results",
-          "name": "Results"
+          "name": "%view.results%"
         },
         {
           "id": "hltv.events",
-          "name": "Events"
+          "name": "%view.events%"
         },
         {
           "id": "hltv.news",
-          "name": "News"
+          "name": "%view.news%"
         }
       ]
     },
     "commands": [
       {
         "command": "hltv.refreshMatches",
-        "title": "Refresh Matches",
+        "title": "%cmd.refreshMatches%",
         "icon": "$(refresh)"
       },
       {
         "command": "hltv.refreshResults",
-        "title": "Refresh Results",
+        "title": "%cmd.refreshResults%",
         "icon": "$(refresh)"
       },
       {
         "command": "hltv.refreshEvents",
-        "title": "Refresh Events",
+        "title": "%cmd.refreshEvents%",
         "icon": "$(refresh)"
       },
       {
         "command": "hltv.refreshNews",
-        "title": "Refresh News",
+        "title": "%cmd.refreshNews%",
         "icon": "$(refresh)"
       },
       {
         "command": "hltv.openMatchDetail",
-        "title": "HLTV: Open Match Details"
+        "title": "%cmd.openMatchDetail%"
       },
       {
         "command": "hltv.openEventDetail",
-        "title": "HLTV: Open Event Details"
+        "title": "%cmd.openEventDetail%"
       },
       {
         "command": "hltv.openNewsDetail",
-        "title": "HLTV: Open News Article"
+        "title": "%cmd.openNewsDetail%"
       },
       {
         "command": "hltv.openOnHLTV",
-        "title": "HLTV: Open on HLTV.org"
+        "title": "%cmd.openOnHLTV%"
       }
     ],
     "menus": {
@@ -137,22 +137,22 @@
         "hltv.proxyServer": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Proxy for reaching hltv.org and challenges.cloudflare.com, e.g. `http://127.0.0.1:7890`. Use the SAME network path as the browser you can open HLTV with, otherwise Cloudflare verification will loop. Falls back to the `HTTPS_PROXY`/`HTTP_PROXY` environment variables when empty."
+          "markdownDescription": "%config.proxyServer%"
         },
         "hltv.browserPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to a Chromium-based browser executable used for fetching HLTV pages (Chrome / Edge / Chromium). Leave empty to auto-detect: Edge → Chrome → Playwright-managed Chromium."
+          "markdownDescription": "%config.browserPath%"
         },
         "hltv.cfClearance": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Escape hatch for a hard-flagged IP: paste the `cf_clearance` cookie value copied from a normal browser that can open hltv.org (F12 → Application → Cookies). Must be paired with `hltv.userAgent` from the same browser, and the browser must share this machine's public IP."
+          "markdownDescription": "%config.cfClearance%"
         },
         "hltv.userAgent": {
           "type": "string",
           "default": "",
-          "description": "The exact User-Agent of the browser the cf_clearance cookie was copied from (F12 → Console → navigator.userAgent). The cookie is only honored when the UA matches."
+          "description": "%config.userAgent%"
         }
       }
     }

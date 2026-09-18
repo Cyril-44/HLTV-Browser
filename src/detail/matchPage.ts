@@ -4,6 +4,7 @@ import { scorebot } from '../hltv/scorebot';
 import { MatchDetail, StatsTable, StatRow, ScoreFrame, LogItem } from '../hltv/types';
 import { PanelRegistry, shellHtml, escapeHtml } from './webviewCommon';
 import { formatDateTime } from '../util/time';
+import { t, webviewStrings } from '../i18n';
 
 const registry = new PanelRegistry();
 
@@ -50,7 +51,7 @@ class MatchDetailPage {
 
   public async load(): Promise<void> {
     try {
-      this.panel.webview.html = shellHtml('加载中…', '<h1 class="meta">正在加载比赛页面…</h1>', this.panel.webview.cspSource);
+      this.panel.webview.html = shellHtml(t('web.loading'), `<h1 class="meta">${t('match.loadingPage')}</h1>`, this.panel.webview.cspSource);
       this.detail = await api.getMatchDetail(this.url);
       this.panel.title = `${this.detail.team1.name} vs ${this.detail.team2.name}`;
       this.render();
@@ -66,7 +67,7 @@ class MatchDetailPage {
         }
       }
     } catch (e) {
-      this.panel.webview.html = shellHtml('加载失败', `<h1>加载失败</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource);
+      this.panel.webview.html = shellHtml(t('page.loadFailed'), `<h1>${t('page.loadFailed')}</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource);
     }
   }
 
@@ -94,11 +95,11 @@ class MatchDetailPage {
 
     if (d.live) {
       parts.push(`<div id="liveSection">
-        <h2>实时计分板 <span class="sub" id="liveMap"></span></h2>
+        <h2>${t('match.liveSection')} <span class="sub" id="liveMap"></span></h2>
         <p class="matchline"><span class="score-big" id="liveScore">…</span></p>
         <p class="meta" id="liveMaps"></p>
         <div id="playerTable"></div>
-        <h3>Game log（击杀提示）</h3>
+        <h3>${t('match.gameLog')}</h3>
         <div class="logbox" id="logbox"></div>
       </div><hr/>`);
     }
@@ -111,7 +112,7 @@ class MatchDetailPage {
 
     // Maps
     if (d.maps.length) {
-      parts.push('<h2>地图</h2><table><tr><th>Map</th><th>Score</th><th>Halves</th></tr>');
+      parts.push(`<h2>${t('match.maps')}</h2><table><tr><th>${t('match.thMap')}</th><th>${t('match.thScore')}</th><th>${t('match.thHalves')}</th></tr>`);
       for (const m of d.maps) {
         parts.push(
           `<tr><td>${escapeHtml(m.name)}</td><td class="num">${escapeHtml(m.score1)} - ${escapeHtml(m.score2)}</td><td class="num">${escapeHtml(m.halves)}</td></tr>`,
@@ -122,17 +123,17 @@ class MatchDetailPage {
 
     // Stats with filters
     if (Object.keys(d.stats).length) {
-      parts.push('<h2>选手统计 <span class="sub">Rating 3.0 · K-D / ADR / KAST 含 Eco 调整列</span></h2>');
+      parts.push(`<h2>${t('match.playerStats')} <span class="sub">${t('match.statsSub')}</span></h2>`);
       parts.push('<div class="btnrow">');
-      parts.push('<span class="muted">Side:</span>');
-      parts.push('<button data-side="both" class="active side-btn">Both</button>');
+      parts.push(`<span class="muted">${t('match.side')}</span>`);
+      parts.push(`<button data-side="both" class="active side-btn">${t('match.both')}</button>`);
       parts.push('<button data-side="t" class="side-btn">T</button>');
       parts.push('<button data-side="ct" class="side-btn">CT</button>');
-      parts.push('<span class="muted" style="margin-left:10px">Eco-adjusted:</span>');
-      parts.push('<button id="ecoBtn" data-on="0">关闭</button>');
+      parts.push(`<span class="muted" style="margin-left:10px">${t('match.eco')}</span>`);
+      parts.push(`<button id="ecoBtn" data-on="0">${t('match.ecoOff')}</button>`);
       parts.push('</div>');
       if (d.statMaps.length > 1) {
-        parts.push('<div class="btnrow"><span class="muted">Map:</span>');
+        parts.push(`<div class="btnrow"><span class="muted">${t('match.mapLabel')}</span>`);
         for (const m of d.statMaps) {
           parts.push(`<button class="map-btn${m.id === 'all' ? ' active' : ''}" data-map="${escapeHtml(m.id)}">${escapeHtml(m.name)}</button>`);
         }
@@ -143,7 +144,7 @@ class MatchDetailPage {
 
     // Lineups
     if (d.lineups.length) {
-      parts.push('<h2>阵容</h2>');
+      parts.push(`<h2>${t('match.lineups')}</h2>`);
       for (const lu of d.lineups) {
         parts.push(`<div><strong>${escapeHtml(lu.team)}</strong>: ${lu.players.map((p) => `${escapeHtml(p.nick)} <span class="muted">(${escapeHtml(p.fullName)})</span>`).join(' · ')}</div>`);
       }
@@ -151,12 +152,13 @@ class MatchDetailPage {
 
     const statsJson = JSON.stringify(d.stats);
     const script = `
+const STR = Object.assign({ ecoOn: ${JSON.stringify(t('match.ecoOn'))}, ecoOff: ${JSON.stringify(t('match.ecoOff'))} }, ${JSON.stringify(webviewStrings())});
 const statsData = ${statsJson};
 function statTables(mapId, side) {
   // All three side variants are embedded in the page data — switching is a
   // pure client-side filter, no request involved.
   const tables = (statsData[mapId] || []).filter(t => t.side === side);
-  if (!tables.length) return '<p class="meta">该侧暂无数据</p>';
+  if (!tables.length) return '<p class="meta">' + STR.noSideData + '</p>';
   return tables.map(t => {
     let h = '<table><tr><th>' + esc(t.team) + '</th><th class="trad">K-D</th><th class="eco">eK-eD</th><th>Swing</th><th class="trad">ADR</th><th class="eco">eADR</th><th class="trad">KAST</th><th class="eco">eKAST</th><th>Rating</th></tr>';
     for (const r of t.rows) {
@@ -189,7 +191,7 @@ document.getElementById('ecoBtn')?.addEventListener('click', (e) => {
   const btn = e.currentTarget;
   const on = btn.dataset.on === '1';
   btn.dataset.on = on ? '0' : '1';
-  btn.textContent = on ? '关闭' : '开启';
+  btn.textContent = on ? STR.ecoOff : STR.ecoOn;
   btn.classList.toggle('active', !on);
   document.body.classList.toggle('eco', !on);
 });
@@ -218,10 +220,10 @@ function renderScoreboard(s) {
   for (const [side, label] of sides) {
     const rows = s[side];
     if (!Array.isArray(rows) || !rows.length) continue;
-    html += '<table><tr><th>' + esc(label) + '</th><th>$</th><th>K</th><th>A</th><th>D</th><th>ADR</th><th>状态</th></tr>';
+    html += '<table><tr><th>' + esc(label) + '</th><th>$</th><th>K</th><th>A</th><th>D</th><th>ADR</th><th>' + STR.stateCol + '</th></tr>';
     for (const p of rows) {
       const adr = p.damagePrRound != null ? (typeof p.damagePrRound === 'number' ? p.damagePrRound.toFixed(1) : p.damagePrRound) : '-';
-      html += '<tr><td>' + esc(p.name || p.nick || '') + '</td><td class="num">' + (p.money ?? '-') + '</td><td class="num">' + (p.score ?? '-') + '</td><td class="num">' + (p.assists ?? '-') + '</td><td class="num">' + (p.deaths ?? '-') + '</td><td class="num">' + adr + '</td><td class="num">' + (p.alive ? '存活' : '阵亡') + '</td></tr>';
+      html += '<tr><td>' + esc(p.name || p.nick || '') + '</td><td class="num">' + (p.money ?? '-') + '</td><td class="num">' + (p.score ?? '-') + '</td><td class="num">' + (p.assists ?? '-') + '</td><td class="num">' + (p.deaths ?? '-') + '</td><td class="num">' + adr + '</td><td class="num">' + (p.alive ? STR.alive : STR.dead) + '</td></tr>';
     }
     html += '</table>';
   }
@@ -248,9 +250,9 @@ renderStats();`;
       ? `${frame.wins[t1 ?? ''] ?? 0} : ${frame.wins[t2 ?? ''] ?? 0}  (${focus[1].scores[t1 ?? ''] ?? 0} - ${focus[1].scores[t2 ?? ''] ?? 0})`
       : '…';
     const mapsLine = maps
-      .map(([, m]) => `${(m.map ?? '').replace(/^de_/, '')} ${m.scores[t1 ?? ''] ?? 0}-${m.scores[t2 ?? ''] ?? 0}${m.mapOver ? '' : ' (进行中)'}`)
+      .map(([, m]) => `${(m.map ?? '').replace(/^de_/, '')} ${m.scores[t1 ?? ''] ?? 0}-${m.scores[t2 ?? ''] ?? 0}${m.mapOver ? '' : ` (${t('card.mapOngoing').replace(/[()]/g, '')})`}`)
       .join(' · ');
-    const mapName = focus ? `${(focus[1].map ?? '').replace(/^de_/, '')}${current ? ' — 进行中' : ''}` : '';
+    const mapName = focus ? `${(focus[1].map ?? '').replace(/^de_/, '')}${current ? ` — ${t('card.mapOngoing').replace(/[()]/g, '')}` : ''}` : '';
     return { scoreLine, mapsLine, mapName };
   }
 }
@@ -264,21 +266,26 @@ export function formatLogItem(item: LogItem): string {
   const nick = (x: unknown): string => String(x ?? '');
   switch (key) {
     case 'PlayerJoin':
-      return `→ ${nick(v.playerNick)} 加入`;
+      return t('log.join', { p: nick(v.playerNick) });
     case 'PlayerQuit':
-      return `← ${nick(v.playerNick)} 离开`;
+      return t('log.quit', { p: nick(v.playerNick) });
     case 'MatchStarted':
-      return `=== 比赛开始: ${nick(v.map).replace(/^de_/, '')} ===`;
+      return t('log.matchStart', { map: nick(v.map).replace(/^de_/, '') });
     case 'RoundEnd': {
       const winner = v.winner === 'CT' ? 'CT' : 'T';
-      return `回合结束 ${nick(v.counterTerroristScore)}:${nick(v.terroristScore)} — ${winner} 胜 (${String(v.winType ?? '').replace(/_/g, ' ')})`;
+      return t('log.roundEnd', {
+        ct: nick(v.counterTerroristScore),
+        t: nick(v.terroristScore),
+        w: winner,
+        type: String(v.winType ?? '').replace(/_/g, ' '),
+      });
     }
     case 'Suicide':
-      return `${nick(v.playerNick)} 自杀 (${nick(v.weapon)})`;
+      return t('log.suicide', { p: nick(v.playerNick), w: nick(v.weapon) });
     case 'BombPlanted':
-      return `炸弹已安放`;
+      return t('log.bombPlanted');
     case 'BombDefused':
-      return `炸弹已拆除`;
+      return t('log.bombDefused');
     default: {
       if (/kill/i.test(key)) {
         const killer = v.killerNick ?? v.killer ?? v.killerName;
@@ -286,11 +293,11 @@ export function formatLogItem(item: LogItem): string {
         const weapon = v.weapon ?? v.weaponName;
         const hs = v.headshot ? ' (HS)' : '';
         if (killer || victim) {
-          return `${nick(killer) || '?'} 击杀 ${nick(victim) || '?'}${weapon ? ` [${nick(weapon)}]` : ''}${hs}`;
+          return t('log.kill', { k: nick(killer) || '?', v: nick(victim) || '?', w: nick(weapon), hs });
         }
       }
       if (/assist/i.test(key)) {
-        return `${nick(v.assisterNick ?? v.assister)} 助攻`;
+        return t('log.assist', { a: nick(v.assisterNick ?? v.assister) });
       }
       return `${key} ${JSON.stringify(v).slice(0, 140)}`;
     }
