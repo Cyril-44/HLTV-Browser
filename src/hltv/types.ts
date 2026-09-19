@@ -189,7 +189,23 @@ export interface NewsSegment {
   italic: boolean;
 }
 
+export interface NewsMatchMap {
+  name: string;
+  score1: string;
+  score2: string;
+}
+
+export interface NewsFixtureRow {
+  epoch: number | null;
+  team1: string;
+  team2: string;
+  url: string;
+}
+
 export type NewsBlock =
+  | { kind: 'fixtures'; event: string; rows: NewsFixtureRow[] }
+  | { kind: 'readMore'; title: string; url: string }
+  | { kind: 'match'; event: string; matchType: string; team1: string; team2: string; score1: string; score2: string; dateText: string; matchUrl: string; maps: NewsMatchMap[]; stats: { team: string; rows: { nick: string; kd: string; swing: string; adr: string; kast: string; rating: string }[] }[] }
   | { kind: 'text'; segments: NewsSegment[]; link?: string }
   | { kind: 'quote'; segments: NewsSegment[]; author?: string }
   | { kind: 'image'; src: string; label: string }
@@ -205,6 +221,12 @@ export interface NewsComment {
   depth: number;
 }
 
+export interface NewsTeamMention {
+  name: string;
+  rank: string;
+  players: string[];
+}
+
 export interface NewsDetail {
   url: string;
   title: string;
@@ -212,6 +234,7 @@ export interface NewsDetail {
   date: number | null;
   intro: string;
   blocks: NewsBlock[];
+  teams: NewsTeamMention[];
   comments: NewsComment[];
 }
 

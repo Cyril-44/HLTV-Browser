@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { CheerioAPI } from 'cheerio';
-import { NewsItem, NewsDetail, NewsBlock, NewsComment, NewsSegment } from '../types';
+import { NewsItem, NewsDetail, NewsBlock, NewsComment, NewsSegment, NewsTeamMention } from '../types';
 
 export function parseNewsList(html: string): NewsItem[] {
   const $ = cheerio.load(html);
@@ -36,11 +36,35 @@ export function parseNewsArticle(html: string, url: string): NewsDetail {
   const intro = article.find('.headertext').first().text().replace(/\s+/g, ' ').trim();
 
   const blocks: NewsBlock[] = [];
+  const teams: NewsTeamMention[] = [];
+  const seenTeams = new Set<string>();
   const body = article.find('.newstext-con').first();
   if (body.length) {
     for (const child of body.children().toArray()) {
-      pushBlock($, child, blocks);
+      pushBlock($, child, blocks, teams, seenTeams);
     }
+  }
+
+  // Team hover cards live OUTSIDE the body container (siblings within the
+  // article); collect each mentioned team's roster, deduplicated.
+  for (const teamBox of article.find('.newsitem-tooltips.team-tooltip').toArray()) {
+    const $box = $(teamBox);
+    const teamLink = $box.find('.newsitem-flex a[href^="/team/"]').first();
+    const name = teamLink.text().replace(/\s+/g, ' ').trim();
+    const teamId = teamLink.attr('href') ?? name;
+    if (!name || seenTeams.has(teamId)) {
+      continue;
+    }
+    seenTeams.add(teamId);
+    teams.push({
+      name,
+      rank: $box.find('.newsitem-flex .text-right b').first().text().trim(),
+      players: $box
+        .find('a.team-player-row')
+        .map((_, x) => $(x).find('b').first().text().trim() || $(x).text().replace(/\s+/g, ' ').trim())
+        .get()
+        .filter(Boolean),
+    });
   }
 
   const comments: NewsComment[] = [];
@@ -49,16 +73,136 @@ export function parseNewsArticle(html: string, url: string): NewsDetail {
     collectComments($, forum, 0, comments);
   }
 
-  return { url, title, author, date, intro, blocks, comments };
+  return { url, title, author, date, intro, blocks, teams, comments };
 }
 
 type AnyNode = { tagName?: string };
 
-function pushBlock($: CheerioAPI, node: AnyNode, blocks: NewsBlock[]): void {
+function pushBlock($: CheerioAPI, node: AnyNode, blocks: NewsBlock[], teams: NewsTeamMention[], seenTeams: Set<string>): void {
   const el = $(node as never);
   const tag = (node.tagName ?? '').toLowerCase();
   const cls = el.attr('class') ?? '';
 
+  if (/newsitem-match-result/.test(cls)) {
+    // Embedded match result widget; the stats table is an adjacent sibling.
+    const eventName = el.find('.newsitem-match-result-top a').first().text().replace(/\s+/g, ' ').trim();
+    const matchType = el.find('.newsitem-match-type').first().text().trim();
+    const teamLinks = el.find('.newsitem-match-result-team-con a[href^="/team/"]');
+    const team1 = teamLinks.eq(0).text().trim();
+    const team2 = teamLinks.eq(1).text().trim();
+    const scores = el.find('.newsitem-match-result-score').map((_, x) => $(x).text().trim()).get();
+    const matchUrl = el.find('.newsitem-match-result-score-con a[href^="/matches/"]').attr('href') ?? '';
+    const dateText = el.find('.newsitem-match-result-date').first().text().trim();
+    const maps: { name: string; score1: string; score2: string }[] = [];
+    for (const mapEl of el.find('.newsitem-match-result-map')) {
+      const $m = $(mapEl);
+      maps.push({
+        name: $m.find('.newsitem-match-result-map-name').first().text().trim(),
+        score1: $m.children().first().text().trim(),
+        score2: $m.children().last().text().trim(),
+      });
+    }
+    // adjacent stats table (same widget family)
+    const stats: { team: string; rows: { nick: string; kd: string; swing: string; adr: string; kast: string; rating: string }[] }[] = [];
+    const statsBoxes = el.nextAll('.newsitem-match-stats');
+    for (const statsBox of statsBoxes.toArray()) {
+      const $stats = $(statsBox).find('table.newsitem-match-stats-table');
+      let current: { team: string; rows: { nick: string; kd: string; swing: string; adr: string; kast: string; rating: string }[] } | null = null;
+      for (const tr of $stats.find('tr')) {
+        const $tr = $(tr);
+        if ($tr.hasClass('newsitem-match-stats-header')) {
+          current = { team: $tr.find('a').first().text().trim(), rows: [] };
+          stats.push(current);
+          continue;
+        }
+        if (!current) {
+          continue;
+        }
+        const nick = $tr.find('.newsitem-match-stats-player .bold').first().text().trim()
+          || $tr.find('.newsitem-match-stats-player a').first().text().trim();
+        if (!nick) {
+          continue;
+        }
+        const cell = (cls: string): string => $tr.find(`td.newsitem-match-stats-${cls}`).first().text().replace(/\s+/g, ' ').trim();
+        current.rows.push({ nick, kd: cell('kd'), swing: cell('roundSwing'), adr: cell('adr'), kast: cell('kast'), rating: cell('rating') });
+      }
+    }
+    if (team1 || team2) {
+      blocks.push({
+        kind: 'match',
+        event: eventName,
+        matchType,
+        team1,
+        team2,
+        score1: scores[0] ?? '',
+        score2: scores[2] ?? scores[1] ?? '',
+        dateText,
+        matchUrl,
+        maps,
+        stats,
+      });
+    }
+    return;
+  }
+  if (/newsitem-match-stats/.test(cls)) {
+    return; // consumed by the match widget above
+  }
+  if (/event-matches-table/.test(cls)) {
+    // Upcoming-match fixture table embedded in preview articles
+    const eventName = el.find('tr.event-header-cell a').first().text().replace(/\s+/g, ' ').trim();
+    const rows: { epoch: number | null; team1: string; team2: string; url: string }[] = [];
+    for (const tr of el.find('tr.team-row')) {
+      const $tr = $(tr);
+      const names = $tr.find('.team-name').map((_, x) => $(x).text().trim()).get();
+      const epochEl = $tr.find('.time-cell [data-unix]').first();
+      const url = $tr.find('.stats-button-cell a[href^="/matches/"]').attr('href') ?? '';
+      if (names.length >= 2) {
+        rows.push({
+          epoch: epochEl.attr('data-unix') ? Number(epochEl.attr('data-unix')) : null,
+          team1: names[0],
+          team2: names[1],
+          url,
+        });
+      }
+    }
+    if (rows.length) {
+      blocks.push({ kind: 'fixtures', event: eventName, rows });
+    }
+    return;
+  }
+  if (/news-read-more/.test(cls)) {
+    const title = el.find('[class*="-bottom"]').first().text().replace(/\s+/g, ' ').trim();
+    const url = el.attr('href') ?? '';
+    if (title && url) {
+      blocks.push({ kind: 'readMore', title, url });
+    }
+    return;
+  }
+  if (/tooltip-con/.test(cls)) {
+    // Hover cards carry the roster of every team mentioned in the article;
+    // render them as a deduplicated appendix instead of stray fragments.
+    const teamBox = el.find('.newsitem-tooltips.team-tooltip').first();
+    if (!teamBox.length) {
+      return; // player tooltips and other popups are not body content
+    }
+    const teamLink = teamBox.find('.newsitem-flex a[href^="/team/"]').first();
+    const name = teamLink.text().replace(/\s+/g, ' ').trim();
+    const teamId = teamLink.attr('href') ?? name;
+    if (!name || seenTeams.has(teamId)) {
+      return;
+    }
+    seenTeams.add(teamId);
+    teams.push({
+      name,
+      rank: teamBox.find('.newsitem-flex .text-right b').first().text().trim(),
+      players: teamBox
+        .find('a.team-player-row')
+        .map((_, x) => $(x).find('b').first().text().trim() || $(x).text().replace(/\s+/g, ' ').trim())
+        .get()
+        .filter(Boolean),
+    });
+    return;
+  }
   if (/featured-quote/.test(cls)) {
     // HLTV's pull-quote board: big italic speech + attribution
     const quoteSegments = collectSegments($, el.find('.featured-quote-quote').first(), [])
@@ -117,7 +261,7 @@ function pushBlock($: CheerioAPI, node: AnyNode, blocks: NewsBlock[]): void {
   const hasBlockChildren = el.children('p,div,blockquote,ul,ol,table').length > 0;
   if (hasBlockChildren) {
     for (const child of el.children().toArray()) {
-      pushBlock($, child, blocks);
+      pushBlock($, child, blocks, teams, seenTeams);
     }
     return;
   }

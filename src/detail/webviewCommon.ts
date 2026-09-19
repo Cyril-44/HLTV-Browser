@@ -69,7 +69,8 @@ export function shellHtml(title: string, body: string, cspSource: string): strin
   .p-alive td:first-child { color: var(--vscode-charts-green, var(--vscode-foreground)); }
   #roundClock { font-family: var(--vscode-editor-font-family); }
   a { color: var(--vscode-textLink-foreground); }
-  .matchline { font-size: 1.05em; margin: 0.2em 0; }
+.matchline { font-size: 1.05em; margin: 0.2em 0; }
+  .matchcard { border: 1px solid var(--vscode-panel-border); padding: 8px 14px; margin: 0.8em 0; }
   .score-big { font-family: var(--vscode-editor-font-family); font-size: 1.6em; font-weight: 600; }
   hr { border: 0; border-top: 1px solid var(--vscode-panel-border); margin: 1.5em 0; }
 </style>
