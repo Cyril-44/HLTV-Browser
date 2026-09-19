@@ -2,7 +2,7 @@
   "name": "hltv-browser-vscode-extension",
   "displayName": "HLTV Browser",
   "description": "Browse HLTV matches, results, events and news inside VS Code",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "local",
   "engines": {
     "vscode": "^1.90.0"

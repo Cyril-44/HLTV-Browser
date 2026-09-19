@@ -62,6 +62,7 @@ const en: Record<string, string> = {
   'news.comments': 'Comments',
   'news.link': 'link',
   // kill feed formatting
+  'log.roundStart': '—— Round start ——',
   'log.join': '→ {p} joined',
   'log.quit': '← {p} left',
   'log.matchStart': '=== Match started: {map} ===',
@@ -69,7 +70,6 @@ const en: Record<string, string> = {
   'log.suicide': '{p} suicided ({w})',
   'log.bombPlanted': 'Bomb planted',
   'log.bombDefused': 'Bomb defused',
-  'log.kill': '{k} killed {v} [{w}]{hs}',
   'log.assist': '{a} assist',
   // engine messages
   'cf.verifyPrompt': 'HLTV is blocked by Cloudflare: a browser window will open — please complete the verification (it closes automatically once done).',
@@ -139,6 +139,7 @@ const zh: Record<string, string> = {
   'news.comments': '评论',
   'news.link': '链接',
   // kill feed formatting
+  'log.roundStart': '—— 回合开始 ——',
   'log.join': '→ {p} 加入',
   'log.quit': '← {p} 离开',
   'log.matchStart': '=== 比赛开始: {map} ===',
@@ -146,7 +147,6 @@ const zh: Record<string, string> = {
   'log.suicide': '{p} 自杀 ({w})',
   'log.bombPlanted': '炸弹已安放',
   'log.bombDefused': '炸弹已拆除',
-  'log.kill': '{k} 击杀 {v} [{w}]{hs}',
   'log.assist': '{a} 助攻',
   // engine messages
   'cf.verifyPrompt': 'HLTV 被Cloudflare拦截：即将弹出浏览器窗口，请完成人机验证（验证通过后窗口会自动关闭并继续加载）。',

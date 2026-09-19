@@ -19,6 +19,7 @@ const vscodeStub = {
   },
   commands: { executeCommand: async () => undefined },
   ProgressLocation: { Notification: 15, Window: 10, SourceControl: 1 },
+  env: { openExternal: async () => true, language: 'zh-cn' },
   workspace: {
     getConfiguration: () => ({ get: (_key, defaultValue) => defaultValue }),
   },

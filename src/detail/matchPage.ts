@@ -29,7 +29,17 @@ class MatchDetailPage {
       void this.panel.webview.postMessage({ type: 'score', ...text });
     },
     onLog: (items: LogItem[], reset: boolean): void => {
-      void this.panel.webview.postMessage({ type: 'log', lines: items.map(formatLogItem).filter(Boolean), reset });
+      const bombPlanted = items.some((i) => 'BombPlanted' in i);
+      const roundEnded = items.some((i) => 'RoundEnd' in i);
+      const roundStarted = items.some((i) => /roundstart/i.test(String(Object.keys(i)[0] ?? '')));
+      void this.panel.webview.postMessage({
+        type: 'log',
+        lines: formatLogItems(items),
+        reset,
+        bombPlanted,
+        roundEnded,
+        roundStarted,
+      });
     },
     onPlayerState: (state: unknown): void => {
       void this.panel.webview.postMessage({ type: 'playerState', state });
@@ -63,7 +73,7 @@ class MatchDetailPage {
         }
         const backlog = scorebot.getRecentLog();
         if (backlog.length) {
-          void this.panel.webview.postMessage({ type: 'log', lines: backlog.map(formatLogItem).filter(Boolean), reset: true });
+          void this.panel.webview.postMessage({ type: 'log', lines: formatLogItems(backlog), reset: true });
         }
       }
     } catch (e) {
@@ -96,7 +106,7 @@ class MatchDetailPage {
     if (d.live) {
       parts.push(`<div id="liveSection">
         <h2>${t('match.liveSection')} <span class="sub" id="liveMap"></span></h2>
-        <p class="matchline"><span class="score-big" id="liveScore">…</span></p>
+        <p class="matchline"><span class="score-big" id="liveScore">…</span> <span class="muted" id="roundClock"></span></p>
         <p class="meta" id="liveMaps"></p>
         <div id="playerTable"></div>
         <h3>${t('match.gameLog')}</h3>
@@ -203,27 +213,69 @@ window.addEventListener('message', (ev) => {
     document.getElementById('liveMap').textContent = m.mapName || '';
   }
   if (m.type === 'log' && m.lines) {
-    const box = document.getElementById('logbox');
-    if (box) {
-      if (m.reset) box.innerHTML = '';
-      for (const line of m.lines) { const div = document.createElement('div'); div.textContent = line; box.prepend(div); }
-      while (box.children.length > 200) box.removeChild(box.lastChild);
-    }
+    prependLog(m.lines, !!m.reset, !!m.bombPlanted, !!m.roundEnded, !!m.roundStarted);
   }
   if (m.type === 'playerState') renderScoreboard(m.state);
 });
+// Round / bomb countdown: base value + timestamp, ticked locally. After a
+// plant the server switches roundTimeRemainingMS to the bomb timer; log flags
+// let us fall back to the standard 40s bomb window.
+let clock = null; // { ms, at }
+function setClock(ms) {
+  clock = { ms, at: Date.now() };
+  renderClock();
+}
+function clearClock() {
+  clock = null;
+  const el = document.getElementById('roundClock');
+  if (el) el.textContent = '';
+}
+function clockText() {
+  if (!clock) return '';
+  const ms = Math.max(0, clock.ms - (Date.now() - clock.at));
+  const sec = Math.ceil(ms / 1000);
+  return String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0');
+}
+function renderClock() {
+  const el = document.getElementById('roundClock');
+  if (el) el.textContent = clock ? clockText() : '';
+}
+setInterval(renderClock, 250);
+
+// Newest on top: every line (backlog and live alike) is inserted at the top,
+// so time runs from bottom (earliest) to top (latest).
+function prependLog(lines, reset, bombPlanted, roundEnded, roundStarted) {
+  const box = document.getElementById('logbox');
+  if (!box) return;
+  if (reset) box.innerHTML = '';
+  for (const l of lines) {
+    const div = document.createElement('div');
+    let text = l.text;
+    const stampClock = !reset && l.kind !== 'notime' && clockText();
+    if (stampClock) text = (l.kind === 'bomb' ? '*' : '') + '[' + stampClock + '] ' + text;
+    else if (l.kind === 'bomb') text = '*' + text;
+    div.textContent = text;
+    box.insertBefore(div, box.firstChild);
+  }
+  while (box.children.length > 200) box.removeChild(box.lastChild);
+  if (roundStarted) setClock(115000); // fresh round: 1:55
+  if (bombPlanted) setClock(clock ? Math.min(clock.ms, 40000) : 40000);
+  if (roundEnded) clearClock();
+}
+
 function renderScoreboard(s) {
   const area = document.getElementById('playerTable');
   if (!area || !s) return;
+  if (typeof s.roundTimeRemainingMS === 'number') setClock(s.roundTimeRemainingMS);
   let html = '';
   const sides = [['TERRORIST', s.terroristTeamName || 'T'], ['CT', s.ctTeamName || 'CT']];
   for (const [side, label] of sides) {
     const rows = s[side];
     if (!Array.isArray(rows) || !rows.length) continue;
-    html += '<table><tr><th>' + esc(label) + '</th><th>$</th><th>K</th><th>A</th><th>D</th><th>ADR</th><th>' + STR.stateCol + '</th></tr>';
+    html += '<table class="ptable"><tr><th>' + esc(label) + '</th><th>$</th><th>K</th><th>A</th><th>D</th><th>ADR</th><th>' + STR.stateCol + '</th></tr>';
     for (const p of rows) {
       const adr = p.damagePrRound != null ? (typeof p.damagePrRound === 'number' ? p.damagePrRound.toFixed(1) : p.damagePrRound) : '-';
-      html += '<tr><td>' + esc(p.name || p.nick || '') + '</td><td class="num">' + (p.money ?? '-') + '</td><td class="num">' + (p.score ?? '-') + '</td><td class="num">' + (p.assists ?? '-') + '</td><td class="num">' + (p.deaths ?? '-') + '</td><td class="num">' + adr + '</td><td class="num">' + (p.alive ? STR.alive : STR.dead) + '</td></tr>';
+      html += '<tr class="p-row ' + (p.alive ? 'p-alive' : 'p-dead') + '"><td>' + esc(p.name || p.nick || '') + '</td><td class="num">' + (p.money ?? '-') + '</td><td class="num">' + (p.score ?? '-') + '</td><td class="num">' + (p.assists ?? '-') + '</td><td class="num">' + (p.deaths ?? '-') + '</td><td class="num">' + adr + '</td><td class="num">' + (p.alive ? STR.alive : STR.dead) + '</td></tr>';
     }
     html += '</table>';
   }
@@ -255,6 +307,89 @@ renderStats();`;
     const mapName = focus ? `${(focus[1].map ?? '').replace(/^de_/, '')}${current ? ` — ${t('card.mapOngoing').replace(/[()]/g, '')}` : ''}` : '';
     return { scoreLine, mapsLine, mapName };
   }
+}
+
+interface PendingKill {
+  index: number;
+  killer: string;
+  weapon: string;
+  hs: string;
+  victim: string;
+}
+
+/** A rendered log line plus how the webview should stamp it. */
+export interface LogLine {
+  text: string;
+  /** normal: [clock] prefix · bomb: `*` before the clock · notime: no stamp */
+  kind: 'normal' | 'bomb' | 'notime';
+}
+
+/**
+ * Format the log stream as display lines. Assists arrive as standalone
+ * entries right after the kill they belong to ("X assist") — merge them into
+ * the kill line: `Niko + m0NESY [ak47] apEX`.
+ */
+export function formatLogItems(items: LogItem[]): LogLine[] {
+  const out: LogLine[] = [];
+  let pending: (PendingKill & { line: LogLine }) | null = null;
+  const str = (x: unknown): string => String(x ?? '');
+  for (const item of items) {
+    const [key, value] = Object.entries(item)[0] ?? [];
+    if (!key || !value || typeof value !== 'object') {
+      if (key) {
+        out.push({ text: String(key), kind: 'normal' });
+      }
+      continue;
+    }
+    const v = value as Record<string, unknown>;
+    if (/^roundstart$/i.test(key)) {
+      out.push({ text: t('log.roundStart'), kind: 'notime' });
+      pending = null;
+      continue;
+    }
+    if (/kill/i.test(key)) {
+      const killer = str(v.killerNick ?? v.killer ?? v.killerName);
+      const victim = str(v.victimNick ?? v.victim ?? v.victimName);
+      const weapon = str(v.weapon ?? v.weaponName);
+      const hs = v.headshot ? ' (HS)' : '';
+      const inlineAssist = str(v.assisterNick ?? v.assistNick ?? v.assister ?? v.assist);
+      if (killer || victim) {
+        const line: LogLine = { text: killLine(killer || '?', inlineAssist, weapon, hs, victim || '?'), kind: 'normal' };
+        out.push(line);
+        pending = { index: out.length - 1, killer: killer || '?', weapon, hs, victim: victim || '?', line };
+      } else {
+        out.push({ text: `${key} ${JSON.stringify(v).slice(0, 140)}`, kind: 'normal' });
+        pending = null;
+      }
+      continue;
+    }
+    if (/assist/i.test(key)) {
+      const nick = str(v.assisterNick ?? v.assistNick ?? v.playerNick ?? v.nick ?? v.playerName);
+      if (nick && pending) {
+        pending.line.text = killLine(pending.killer, nick, pending.weapon, pending.hs, pending.victim);
+        pending = null; // one assist merges per kill
+        continue;
+      }
+      out.push({ text: t('log.assist', { a: nick || '?' }), kind: 'normal' });
+      pending = null;
+      continue;
+    }
+    if (/bombplanted/i.test(key)) {
+      out.push({ text: t('log.bombPlanted'), kind: 'bomb' });
+      pending = null;
+      continue;
+    }
+    pending = null;
+    const single = formatLogItem(item);
+    if (single) {
+      out.push({ text: single, kind: 'normal' });
+    }
+  }
+  return out;
+}
+
+function killLine(killer: string, assist: string, weapon: string, hs: string, victim: string): string {
+  return `${killer}${assist ? ` + ${assist}` : ''}${weapon ? ` [${weapon}]` : ''}${hs} ${victim}`;
 }
 
 export function formatLogItem(item: LogItem): string {
@@ -293,7 +428,7 @@ export function formatLogItem(item: LogItem): string {
         const weapon = v.weapon ?? v.weaponName;
         const hs = v.headshot ? ' (HS)' : '';
         if (killer || victim) {
-          return t('log.kill', { k: nick(killer) || '?', v: nick(victim) || '?', w: nick(weapon), hs });
+          return killLine(nick(killer) || '?', '', nick(weapon), hs, nick(victim) || '?');
         }
       }
       if (/assist/i.test(key)) {
