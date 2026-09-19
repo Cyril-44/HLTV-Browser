@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { CheerioAPI } from 'cheerio';
-import { NewsItem, NewsDetail, NewsBlock, NewsComment } from '../types';
+import { NewsItem, NewsDetail, NewsBlock, NewsComment, NewsSegment } from '../types';
 
 export function parseNewsList(html: string): NewsItem[] {
   const $ = cheerio.load(html);
@@ -59,6 +59,17 @@ function pushBlock($: CheerioAPI, node: AnyNode, blocks: NewsBlock[]): void {
   const tag = (node.tagName ?? '').toLowerCase();
   const cls = el.attr('class') ?? '';
 
+  if (/featured-quote/.test(cls)) {
+    // HLTV's pull-quote board: big italic speech + attribution
+    const quoteSegments = collectSegments($, el.find('.featured-quote-quote').first(), [])
+      .map((seg) => ({ ...seg, italic: true }));
+    const author = el.find('.featured-quote-author').first().text().replace(/\s+/g, ' ').trim();
+    if (quoteSegments.length) {
+      normalizeSegments(quoteSegments);
+      blocks.push({ kind: 'quote', segments: quoteSegments, author });
+    }
+    return;
+  }
   if (/image-con/.test(cls)) {
     const src = el.find('img').first().attr('src') ?? '';
     if (src) {
@@ -75,31 +86,96 @@ function pushBlock($: CheerioAPI, node: AnyNode, blocks: NewsBlock[]): void {
     return;
   }
   if (tag === 'blockquote') {
-    const text = el.text().replace(/\s+/g, ' ').trim();
-    if (text) {
-      blocks.push({ kind: 'quote', text });
+    const segments = collectSegments($, node, []);
+    if (segments.length) {
+      blocks.push({ kind: 'quote', segments });
     }
     return;
   }
   if (tag === 'p') {
-    const text = el.text().replace(/\s+/g, ' ').trim();
-    if (!text || /headertext/.test(cls)) {
+    if (/headertext/.test(cls)) {
       return; // headertext is the intro, captured separately
     }
+    const segments = collectSegments($, node, []);
+    const flat = segments.map((x) => x.text).join('').replace(/\s+/g, ' ').trim();
+    if (!flat) {
+      return;
+    }
+    // normalize whitespace inside segments while keeping bold/italic runs
+    normalizeSegments(segments);
     const link = el.find('a[href]').not('a[href*="hltv.org"]').first().attr('href');
     if (/news-block/.test(cls) && el.closest('blockquote').length) {
-      blocks.push({ kind: 'quote', text });
+      blocks.push({ kind: 'quote', segments });
     } else {
-      blocks.push({ kind: 'text', text, link });
+      blocks.push({ kind: 'text', segments, link });
     }
     return;
   }
-  // unknown container (divs wrapping paragraphs, etc.) — recurse one level
-  const text = el.text().replace(/\s+/g, ' ').trim();
-  if (text && el.children().length) {
+  // Unknown container: recurse into block-level children; otherwise render
+  // its inline content (bare-text divs like image captions were dropped
+  // entirely by the old recursion-only branch).
+  const hasBlockChildren = el.children('p,div,blockquote,ul,ol,table').length > 0;
+  if (hasBlockChildren) {
     for (const child of el.children().toArray()) {
       pushBlock($, child, blocks);
     }
+    return;
+  }
+  const segments = collectSegments($, node, []);
+  const flat = segments.map((x) => x.text).join('').replace(/\s+/g, ' ').trim();
+  if (flat) {
+    normalizeSegments(segments);
+    blocks.push({ kind: 'text', segments });
+  }
+}
+
+/**
+ * Walk inline content preserving bold (strong/b — HLTV uses them for
+ * interview questions, leads and entity names) and italic (em/i) runs.
+ */
+function collectSegments($: CheerioAPI, node: unknown, out: NewsSegment[]): NewsSegment[] {
+  const push = (text: string, bold: boolean, italic: boolean): void => {
+    if (!text) {
+      return;
+    }
+    const last = out[out.length - 1];
+    if (last && last.bold === bold && last.italic === italic) {
+      last.text += text;
+    } else {
+      out.push({ text, bold, italic });
+    }
+  };
+  const walk = (child: unknown, bold: boolean, italic: boolean): void => {
+    const $child = $(child as never);
+    if ((child as { type?: string }).type === 'text') {
+      push($child.text(), bold, italic);
+      return;
+    }
+    const tag = ((child as { tagName?: string }).tagName ?? '').toLowerCase();
+    const nextBold = bold || tag === 'strong' || tag === 'b';
+    const nextItalic = italic || tag === 'em' || tag === 'i';
+    if (tag === 'br') {
+      push(' ', bold, italic);
+      return;
+    }
+    for (const inner of $child.contents().toArray()) {
+      walk(inner, nextBold, nextItalic);
+    }
+  };
+  for (const child of $(node as never).contents().toArray()) {
+    walk(child, false, false);
+  }
+  return out;
+}
+
+function normalizeSegments(segments: NewsSegment[]): void {
+  for (const seg of segments) {
+    seg.text = seg.text.replace(/\s+/g, ' ');
+  }
+  if (segments.length) {
+    segments[0].text = segments[0].text.replace(/^\s+/, '');
+    const last = segments[segments.length - 1];
+    last.text = last.text.replace(/\s+$/, '');
   }
 }
 

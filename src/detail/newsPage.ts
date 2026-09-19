@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as api from '../hltv/api';
-import { NewsDetail, NewsBlock } from '../hltv/types';
+import { NewsDetail, NewsBlock, NewsSegment } from '../hltv/types';
 import { PanelRegistry, shellHtml, escapeHtml } from './webviewCommon';
 import { formatDateTime } from '../util/time';
 import { t, webviewStrings } from '../i18n';
@@ -12,11 +12,18 @@ export function openNewsDetail(url: string): void {
     const panel = vscode.window.createWebviewPanel('hltv.newsDetail', 'HLTV News', vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
+      enableFindWidget: true,
     });
     const page = new NewsDetailPage(panel, url);
     void page.load();
     return panel;
   });
+}
+
+function renderSegments(segments: NewsSegment[]): string {
+  return segments
+    .map((seg) => `${seg.bold ? '<strong>' : ''}${seg.italic ? '<em>' : ''}${escapeHtml(seg.text)}${seg.italic ? '</em>' : ''}${seg.bold ? '</strong>' : ''}`)
+    .join('');
 }
 
 class NewsDetailPage {
@@ -53,10 +60,12 @@ class NewsDetailPage {
     for (const block of d.blocks) {
       switch (block.kind) {
         case 'text':
-          parts.push(`<p>${escapeHtml(block.text)}${block.link ? ` <a href="#" class="extlink" data-url="${escapeHtml(block.link)}">[${t('news.link')}]</a>` : ''}</p>`);
+          parts.push(`<p>${renderSegments(block.segments)}${block.link ? ` <a href="#" class="extlink" data-url="${escapeHtml(block.link)}">[${t('news.link')}]</a>` : ''}</p>`);
           break;
         case 'quote':
-          parts.push(`<blockquote>${escapeHtml(block.text)}</blockquote>`);
+          parts.push(
+            `<blockquote>${renderSegments(block.segments)}${block.author ? `<footer class="muted">— ${escapeHtml(block.author)}</footer>` : ''}</blockquote>`,
+          );
           break;
         case 'image':
           parts.push(

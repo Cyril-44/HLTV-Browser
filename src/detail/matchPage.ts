@@ -14,6 +14,7 @@ export function openMatchDetail(url: string): void {
     const panel = vscode.window.createWebviewPanel('hltv.matchDetail', 'HLTV Match', vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
+      enableFindWidget: true,
     });
     const page = new MatchDetailPage(panel, url);
     void page.load();
@@ -55,6 +56,9 @@ class MatchDetailPage {
     panel.webview.onDidReceiveMessage((msg: { type: string; url?: string }) => {
       if (msg.type === 'openLink' && msg.url) {
         void vscode.env.openExternal(vscode.Uri.parse('https://www.hltv.org' + msg.url));
+      }
+      if (msg.type === 'openMatch' && msg.url) {
+        openMatchDetail(msg.url);
       }
     });
   }
@@ -152,6 +156,19 @@ class MatchDetailPage {
       parts.push('<div id="statsArea"></div>');
     }
 
+    // Past matches (each side's recent results)
+    for (const side of d.pastMatches) {
+      parts.push(`<h2>${t('match.past')} <span class="sub">${escapeHtml(side.team)}</span></h2>`);
+      parts.push(`<table><tr><th>${t('match.thOpponent')}</th><th>${t('match.thWhen')}</th><th>${t('match.thMap')}</th><th>${t('match.thScore')}</th></tr>`);
+      for (const m of side.matches) {
+        const scoreClass = m.won === true ? 'won' : m.won === false ? 'lost' : '';
+        parts.push(
+          `<tr><td>${m.url ? `<a href="#" class="matchlink" data-url="${escapeHtml(m.url)}">${escapeHtml(m.opponent)}</a>` : escapeHtml(m.opponent)}</td><td class="muted">${escapeHtml(m.timeAgo)}</td><td>${escapeHtml(m.format)}</td><td class="num ${scoreClass}">${escapeHtml(m.score)}</td></tr>`,
+        );
+      }
+      parts.push('</table>');
+    }
+
     // Lineups
     if (d.lineups.length) {
       parts.push(`<h2>${t('match.lineups')}</h2>`);
@@ -221,6 +238,10 @@ window.addEventListener('message', (ev) => {
 // plant the server switches roundTimeRemainingMS to the bomb timer; log flags
 // let us fall back to the standard 40s bomb window.
 let clock = null; // { ms, at }
+// The round-clock text at the moment of the plant — BombPlanted lines are
+// stamped with THIS (the round time when the bomb went down), not the
+// subsequent 40s bomb countdown.
+let plantClockText = null;
 function setClock(ms) {
   clock = { ms, at: Date.now() };
   renderClock();
@@ -234,7 +255,8 @@ function clockText() {
   if (!clock) return '';
   const ms = Math.max(0, clock.ms - (Date.now() - clock.at));
   const sec = Math.ceil(ms / 1000);
-  return String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0');
+  // rounds last at most 1:55 — no minute padding
+  return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
 }
 function renderClock() {
   const el = document.getElementById('roundClock');
@@ -248,25 +270,53 @@ function prependLog(lines, reset, bombPlanted, roundEnded, roundStarted) {
   const box = document.getElementById('logbox');
   if (!box) return;
   if (reset) box.innerHTML = '';
+  // Freeze the round time BEFORE switching to the bomb countdown so the
+  // BombPlanted line carries the round time at the plant.
+  let stampAtPlant = null;
+  if (bombPlanted && clock && clock.ms - (Date.now() - clock.at) > 40000) {
+    stampAtPlant = clockText();
+  }
   for (const l of lines) {
+    // cross-batch duplicate collapse (warmup loops)
+    const first = box.firstChild;
+    if (first && first.textContent.replace(/^\[*[0-9:*]*\]*\s*/, '') === l.text) continue;
     const div = document.createElement('div');
     let text = l.text;
-    const stampClock = !reset && l.kind !== 'notime' && clockText();
-    if (stampClock) text = (l.kind === 'bomb' ? '*' : '') + '[' + stampClock + '] ' + text;
-    else if (l.kind === 'bomb') text = '*' + text;
+    if (!reset && l.kind !== 'notime') {
+      let stamp = clockText();
+      if (l.kind === 'bomb') stamp = stampAtPlant ?? plantClockText ?? stamp;
+      if (stamp) text = (l.kind === 'bomb' ? '*' : '') + '[' + stamp + '] ' + text;
+      else if (l.kind === 'bomb') text = '*' + text;
+    } else if (l.kind === 'bomb') {
+      text = '*' + text;
+    }
     div.textContent = text;
     box.insertBefore(div, box.firstChild);
   }
   while (box.children.length > 200) box.removeChild(box.lastChild);
-  if (roundStarted) setClock(115000); // fresh round: 1:55
-  if (bombPlanted) setClock(clock ? Math.min(clock.ms, 40000) : 40000);
-  if (roundEnded) clearClock();
+  if (bombPlanted) {
+    if (stampAtPlant) plantClockText = stampAtPlant;
+    setClock(clock ? Math.min(clock.ms, 40000) : 40000);
+  }
+  if (roundStarted) {
+    plantClockText = null;
+    setClock(115000); // fresh round: 1:55
+  }
+  if (roundEnded) {
+    plantClockText = null;
+    clearClock();
+  }
 }
 
 function renderScoreboard(s) {
   const area = document.getElementById('playerTable');
   if (!area || !s) return;
-  if (typeof s.roundTimeRemainingMS === 'number') setClock(s.roundTimeRemainingMS);
+  if (typeof s.roundTimeRemainingMS === 'number') {
+    if (s.bombPlanted && clock && !plantClockText && clock.ms - (Date.now() - clock.at) > 40000) {
+      plantClockText = clockText();
+    }
+    setClock(s.bombPlanted ? Math.min(s.roundTimeRemainingMS, 40000) : s.roundTimeRemainingMS);
+  }
   let html = '';
   const sides = [['TERRORIST', s.terroristTeamName || 'T'], ['CT', s.ctTeamName || 'CT']];
   for (const [side, label] of sides) {
@@ -281,6 +331,9 @@ function renderScoreboard(s) {
   }
   if (html) area.innerHTML = html;
 }
+document.querySelectorAll('.matchlink').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault(); acquireVsCodeApi().postMessage({ type: 'openMatch', url: a.dataset.url });
+}));
 renderStats();`;
 
     this.panel.webview.html = shellHtml(
@@ -331,20 +384,32 @@ export interface LogLine {
  */
 export function formatLogItems(items: LogItem[]): LogLine[] {
   const out: LogLine[] = [];
+  // Assists usually ARRIVE BEFORE the kill they belong to in the scorebot
+  // stream, but sometimes follow it — support both directions.
   let pending: (PendingKill & { line: LogLine }) | null = null;
+  let pendingAssist: string | null = null;
   const str = (x: unknown): string => String(x ?? '');
+  const push = (line: LogLine): void => {
+    // Warmup loops repeat identical announcements (Match started etc.) —
+    // collapse consecutive duplicates.
+    if (out.length && out[out.length - 1].text === line.text && line.kind === 'normal') {
+      return;
+    }
+    out.push(line);
+  };
   for (const item of items) {
     const [key, value] = Object.entries(item)[0] ?? [];
     if (!key || !value || typeof value !== 'object') {
       if (key) {
-        out.push({ text: String(key), kind: 'normal' });
+        push({ text: String(key), kind: 'normal' });
       }
       continue;
     }
     const v = value as Record<string, unknown>;
-    if (/^roundstart$/i.test(key)) {
-      out.push({ text: t('log.roundStart'), kind: 'notime' });
+    if (/^roundstart$/i.test(key) || /restart/i.test(key)) {
+      push({ text: t(/restart/i.test(key) ? 'log.restart' : 'log.roundStart'), kind: 'notime' });
       pending = null;
+      pendingAssist = null;
       continue;
     }
     if (/kill/i.test(key)) {
@@ -353,12 +418,18 @@ export function formatLogItems(items: LogItem[]): LogLine[] {
       const weapon = str(v.weapon ?? v.weaponName);
       const hs = v.headshot ? ' (HS)' : '';
       const inlineAssist = str(v.assisterNick ?? v.assistNick ?? v.assister ?? v.assist);
+      const assist = pendingAssist ?? inlineAssist;
+      pendingAssist = null;
       if (killer || victim) {
-        const line: LogLine = { text: killLine(killer || '?', inlineAssist, weapon, hs, victim || '?'), kind: 'normal' };
-        out.push(line);
-        pending = { index: out.length - 1, killer: killer || '?', weapon, hs, victim: victim || '?', line };
+        const line: LogLine = { text: killLine(killer || '?', assist, weapon, hs, victim || '?'), kind: 'normal' };
+        push(line);
+        if (!assist) {
+          pending = { index: out.length - 1, killer: killer || '?', weapon, hs, victim: victim || '?', line };
+        } else {
+          pending = null;
+        }
       } else {
-        out.push({ text: `${key} ${JSON.stringify(v).slice(0, 140)}`, kind: 'normal' });
+        push({ text: `${key} ${JSON.stringify(v).slice(0, 140)}`, kind: 'normal' });
         pending = null;
       }
       continue;
@@ -366,23 +437,39 @@ export function formatLogItems(items: LogItem[]): LogLine[] {
     if (/assist/i.test(key)) {
       const nick = str(v.assisterNick ?? v.assistNick ?? v.playerNick ?? v.nick ?? v.playerName);
       if (nick && pending) {
+        // assist arriving AFTER its kill
         pending.line.text = killLine(pending.killer, nick, pending.weapon, pending.hs, pending.victim);
-        pending = null; // one assist merges per kill
+        pending = null;
         continue;
       }
-      out.push({ text: t('log.assist', { a: nick || '?' }), kind: 'normal' });
-      pending = null;
+      pendingAssist = nick || null; // assist arriving BEFORE its kill
       continue;
     }
     if (/bombplanted/i.test(key)) {
-      out.push({ text: t('log.bombPlanted'), kind: 'bomb' });
+      push({ text: t('log.bombPlanted'), kind: 'bomb' });
       pending = null;
+      pendingAssist = null;
+      continue;
+    }
+    if (/roundend/i.test(key)) {
+      push({
+        text: t('log.roundEnd', {
+          ct: str(v.counterTerroristScore),
+          t: str(v.terroristScore),
+          w: v.winner === 'CT' ? 'CT' : 'T',
+          type: String(v.winType ?? '').replace(/_/g, ' '),
+        }),
+        kind: 'notime',
+      });
+      pending = null;
+      pendingAssist = null;
       continue;
     }
     pending = null;
+    pendingAssist = null;
     const single = formatLogItem(item);
     if (single) {
-      out.push({ text: single, kind: 'normal' });
+      push({ text: single, kind: 'normal' });
     }
   }
   return out;
@@ -415,6 +502,8 @@ export function formatLogItem(item: LogItem): string {
         type: String(v.winType ?? '').replace(/_/g, ' '),
       });
     }
+    case 'Restart':
+      return t('log.restart');
     case 'Suicide':
       return t('log.suicide', { p: nick(v.playerNick), w: nick(v.weapon) });
     case 'BombPlanted':

@@ -13,6 +13,7 @@ export function openEventDetail(url: string): void {
     const panel = vscode.window.createWebviewPanel('hltv.eventDetail', 'HLTV Event', vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
+      enableFindWidget: true,
     });
     const page = new EventDetailPage(panel, url);
     void page.load();
@@ -73,11 +74,15 @@ class EventDetailPage {
         for (const round of section.rounds) {
           parts.push(`<h3 class="meta">${escapeHtml(round.name)}</h3>`);
           for (const mu of round.matchups) {
-            const score = mu.score1 !== null && mu.score2 !== null ? ` <strong>${mu.score1} - ${mu.score2}</strong>` : '';
-            const link = mu.matchUrl
-              ? `<a href="#" class="matchlink" data-url="${escapeHtml(mu.matchUrl)}">${escapeHtml(mu.team1)} vs ${escapeHtml(mu.team2)}</a>`
+            // "Natus Vincere 0 - 2 Aurora" once played; "TBD vs TBD" otherwise
+            const hasScore = mu.score1 !== null && mu.score2 !== null;
+            const body = hasScore
+              ? `${escapeHtml(mu.team1)} <strong>${mu.score1} - ${mu.score2}</strong> ${escapeHtml(mu.team2)}`
               : `${escapeHtml(mu.team1)} vs ${escapeHtml(mu.team2)}`;
-            parts.push(`<p class="matchline">${link}${score}</p>`);
+            const link = mu.matchUrl
+              ? `<a href="#" class="matchlink" data-url="${escapeHtml(mu.matchUrl)}">${body}</a>`
+              : body;
+            parts.push(`<p class="matchline">${link}</p>`);
           }
         }
       }

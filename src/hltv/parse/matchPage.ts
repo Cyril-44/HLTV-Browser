@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { CheerioAPI } from 'cheerio';
-import { MatchDetail, MapBlock, StatsTable, StatRow, LineupPlayer } from '../types';
+import { MatchDetail, MapBlock, StatsTable, StatRow, LineupPlayer, TeamPastMatches } from '../types';
 
 export function parseMatchPage(html: string, url: string): MatchDetail {
   const $ = cheerio.load(html);
@@ -50,6 +50,7 @@ export function parseMatchPage(html: string, url: string): MatchDetail {
   const maps = parseMaps($);
   const { statMaps, stats } = parseStats($);
   const lineups = parseLineups($);
+  const pastMatches = parsePastMatches($);
 
   return {
     id,
@@ -67,6 +68,7 @@ export function parseMatchPage(html: string, url: string): MatchDetail {
     statMaps,
     stats,
     lineups,
+    pastMatches,
     scorebot: sb.attr('data-scorebot-id')
       ? {
           url: sb.attr('data-scorebot-url') ?? 'https://scorebot-lb.hltv.org',
@@ -177,6 +179,40 @@ function parseStats($: CheerioAPI): { statMaps: { id: string; name: string }[]; 
 function cell($tr: cheerio.Cheerio<any>, base: string, variant: string): string {
   const sel = variant ? `td.${base}.${variant}` : `td.${base}`;
   return $tr.find(sel).first().text().trim();
+}
+
+function parsePastMatches($: CheerioAPI): TeamPastMatches[] {
+  const out: TeamPastMatches[] = [];
+  // The "Team" view grid holds each side's recent results (won/lost relative
+  // to that side); the "Core" grid is a combined variant we skip.
+  for (const box of $('.past-matches-grid[data-past-matches-team] .past-matches-box')) {
+    const $box = $(box);
+    const team = $box.find('.past-matches-headline .past-matches-teamname a').first().text().trim();
+    if (!team) {
+      continue;
+    }
+    const matches = [];
+    for (const tr of $box.find('.past-matches-table tr')) {
+      const $tr = $(tr);
+      const scoreCell = $tr.find('.past-matches-score a').first();
+      const score = scoreCell.text().replace(/\s+/g, ' ').trim();
+      if (!score) {
+        continue;
+      }
+      matches.push({
+        opponent: $tr.find('.past-matches-teamname a').first().text().trim(),
+        timeAgo: $tr.find('.past-matches-time-ago').first().text().trim(),
+        format: $tr.find('.past-matches-map a').first().text().trim(),
+        score,
+        won: scoreCell.hasClass('won') ? true : scoreCell.hasClass('lost') ? false : null,
+        url: scoreCell.attr('href') ?? '',
+      });
+    }
+    if (matches.length) {
+      out.push({ team, matches });
+    }
+  }
+  return out;
 }
 
 function parseLineups($: CheerioAPI): { team: string; players: LineupPlayer[] }[] {

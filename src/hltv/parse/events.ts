@@ -3,8 +3,40 @@ import { EventSummary } from '../types';
 
 export function parseEventsPage(html: string): EventSummary[] {
   const $ = cheerio.load(html);
-  const events: EventSummary[] = [];
-  const seen = new Set<number>();
+  // id → event; ongoing entries are inserted first so duplicates from the
+  // upcoming lists never overwrite them.
+  const byId = new Map<number, EventSummary>();
+
+  // Ongoing events live in their own containers (a.ongoing-event, duplicated
+  // across the FEATURED/TODAY tabs — the map dedupes them).
+  for (const el of $('a.ongoing-event')) {
+    const $el = $(el);
+    const href = $el.attr('href') ?? '';
+    const idMatch = /\/events\/(\d+)/.exec(href);
+    if (!idMatch || byId.has(Number(idMatch[1]))) {
+      continue;
+    }
+    const unixSpans = $el.find('[data-unix]').map((_, s) => $(s).attr('data-unix')).get();
+    const dateSpans = $el.find('[data-unix]').map((_, s) => $(s).text().trim()).get();
+    // The FEATURED tab shows ongoing tournaments with the big-block layout;
+    // the TODAY tab lists all ongoing events (duplicates — deduped by the map).
+    const featured = $el.closest('.tab-content').attr('id') === 'FEATURED';
+    byId.set(Number(idMatch[1]), {
+      id: Number(idMatch[1]),
+      url: href,
+      name: $el.find('.event-name-small .text-ellipsis').first().text().trim(),
+      dateText: dateSpans.join(' - '),
+      dateStart: unixSpans.length ? Math.min(...unixSpans.map(Number)) : null,
+      prize: '',
+      teamsCount: '',
+      location: '',
+      type: $el.find('.lan-marker').first().text().trim(),
+      big: featured,
+      ongoing: true,
+    });
+  }
+
+  const events: EventSummary[] = [...byId.values()];
 
   for (const el of $('a.big-event, a.small-event')) {
     const $el = $(el);
@@ -14,10 +46,9 @@ export function parseEventsPage(html: string): EventSummary[] {
       continue;
     }
     const id = Number(idMatch[1]);
-    if (seen.has(id)) {
+    if (byId.has(id)) {
       continue;
     }
-    seen.add(id);
 
     const big = $el.hasClass('big-event');
     const name = big
@@ -54,7 +85,9 @@ export function parseEventsPage(html: string): EventSummary[] {
         : tdText('td.col-value.location'),
       type,
       big,
+      ongoing: false,
     });
+    byId.set(id, events[events.length - 1]);
   }
   return events;
 }

@@ -188,6 +188,15 @@ export class MatchNode extends vscode.TreeItem {
     if (d.vetoes.length) {
       rows.push(new CardRow('BP', t('card.bpSteps', { n: d.vetoes.length })));
     }
+    for (const side of d.pastMatches) {
+      const recent = side.matches
+        .slice(0, 5)
+        .map((m) => `${m.won === true ? 'W' : m.won === false ? 'L' : '·'} ${m.score} ${m.opponent}`)
+        .join('，');
+      if (recent) {
+        rows.push(new CardRow(t('card.recent', { team: side.team }), recent));
+      }
+    }
     return rows;
   }
 }

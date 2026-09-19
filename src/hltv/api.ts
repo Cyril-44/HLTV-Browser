@@ -27,6 +27,7 @@ const caches = {
   results: snapshotCache<ResultMatch[]>(),
   events: snapshotCache<EventSummary[]>(),
   eventMatches: new Map<number, TtlCache<Match[]>>(),
+  eventResults: new Map<number, TtlCache<ResultMatch[]>>(),
   matchDetail: snapshotCache<MatchDetail>(),
   eventDetail: snapshotCache<EventDetail>(),
   news: snapshotCache<NewsItem[]>(),
@@ -39,6 +40,7 @@ export function clearAllCaches(): void {
   caches.results.clear();
   caches.events.clear();
   caches.eventMatches.clear();
+  caches.eventResults.clear();
   caches.matchDetail.clear();
   caches.eventDetail.clear();
   caches.news.clear();
@@ -63,10 +65,15 @@ export function getResults(): Promise<ResultMatch[]> {
 export function getEvents(): Promise<EventSummary[]> {
   return caches.events.wrap('events', async () => {
     const events = parseEventsPage(await html('/events'));
-    // T1/featured (card) events first, then everything else by start date.
+    // Big-block (featured) tournaments first — ongoing featured (like a
+    // running StarLadder) above upcoming featured — then small ongoing
+    // events, then everything else by date.
+    const rank = (e: EventSummary): number => (e.big ? 2 : 0) + (e.ongoing ? 1 : 0);
     return events.sort((a, b) => {
-      if (a.big !== b.big) {
-        return a.big ? -1 : 1;
+      const ra = rank(a);
+      const rb = rank(b);
+      if (ra !== rb) {
+        return rb - ra;
       }
       return (a.dateStart ?? 0) - (b.dateStart ?? 0);
     });
@@ -81,6 +88,16 @@ export function getEventMatches(eventId: number): Promise<Match[]> {
   }
   return cache.wrap(String(eventId), async () =>
     parseMatchesPage(await html(`/events/${eventId}/matches`)));
+}
+
+/** Past results of one event (/results?event=<id> filters correctly). */
+export function getEventResults(eventId: number): Promise<ResultMatch[]> {
+  let cache = caches.eventResults.get(eventId);
+  if (!cache) {
+    cache = snapshotCache<ResultMatch[]>();
+    caches.eventResults.set(eventId, cache);
+  }
+  return cache.wrap(String(eventId), async () => parseResultsPage(await html(`/results?event=${eventId}`)));
 }
 
 export function getMatchDetail(path: string): Promise<MatchDetail> {

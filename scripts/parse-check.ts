@@ -84,7 +84,7 @@ summary('newsArticle', {
   author: article.author,
   date: article.date,
   intro: article.intro?.slice(0, 100),
-  blocks: article.blocks.map((b) => `${b.kind}: ${'text' in b ? b.text?.slice(0, 60) : b.label}`),
+  blocks: article.blocks.map((b) => `${b.kind}${'segments' in b && b.segments.some((x) => x.bold) ? '(B)' : ''}: ${'segments' in b ? b.segments.map((x) => x.text).join('').slice(0, 60) : b.label}`),
   comments: article.comments.length,
   firstComments: article.comments.slice(0, 3),
 });

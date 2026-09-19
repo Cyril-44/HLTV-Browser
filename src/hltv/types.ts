@@ -58,6 +58,7 @@ export interface EventSummary {
   location: string;
   type: string;
   big: boolean;
+  ongoing: boolean;
 }
 
 export interface EventTeam {
@@ -135,6 +136,20 @@ export interface LineupPlayer {
   fullName: string;
 }
 
+export interface PastMatch {
+  opponent: string;
+  timeAgo: string;
+  format: string;
+  score: string;
+  won: boolean | null; // null = draw/unknown
+  url: string;
+}
+
+export interface TeamPastMatches {
+  team: string;
+  matches: PastMatch[];
+}
+
 export interface MatchDetail {
   id: number;
   url: string;
@@ -151,6 +166,7 @@ export interface MatchDetail {
   statMaps: { id: string; name: string }[];
   stats: { [mapId: string]: StatsTable[] };
   lineups: { team: string; players: LineupPlayer[] }[];
+  pastMatches: TeamPastMatches[];
   scorebot: {
     url: string;
     id: number;
@@ -167,9 +183,15 @@ export interface NewsItem {
   comments: string;
 }
 
+export interface NewsSegment {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+}
+
 export type NewsBlock =
-  | { kind: 'text'; text: string; link?: string }
-  | { kind: 'quote'; text: string }
+  | { kind: 'text'; segments: NewsSegment[]; link?: string }
+  | { kind: 'quote'; segments: NewsSegment[]; author?: string }
   | { kind: 'image'; src: string; label: string }
   | { kind: 'embed'; provider: string; src: string; label: string };
 
