@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as api from '../hltv/api';
 import { EventDetail } from '../hltv/types';
-import { PanelRegistry, shellHtml, escapeHtml } from './webviewCommon';
+import { PanelRegistry, shellHtml, escapeHtml, panelKey } from './webviewCommon';
 import { formatDate } from '../util/time';
 import { t, webviewStrings } from '../i18n';
 import { openMatchDetail } from './matchPage';
@@ -9,7 +9,8 @@ import { openMatchDetail } from './matchPage';
 const registry = new PanelRegistry();
 
 export function openEventDetail(url: string): void {
-  registry.getOrCreate(`event:${url}`, () => {
+  const key = panelKey('events', url) ?? `event:${url}`;
+  registry.getOrCreate(key, () => {
     const panel = vscode.window.createWebviewPanel('hltv.eventDetail', 'HLTV Event', vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
@@ -27,20 +28,27 @@ class EventDetailPage {
       if (msg.type === 'openMatch' && msg.url) {
         openMatchDetail(msg.url);
       }
+      if (msg.type === 'openEvent' && msg.url) {
+        openEventDetail(msg.url);
+      }
       if (msg.type === 'openLink' && msg.url) {
         void vscode.env.openExternal(vscode.Uri.parse('https://www.hltv.org' + msg.url));
+      }
+      if (msg.type === 'refreshPage') {
+        api.clearDetailCache(this.url);
+        void this.load();
       }
     });
   }
 
   public async load(): Promise<void> {
     try {
-      this.panel.webview.html = shellHtml(t('web.loading'), `<h1 class="meta">${t('event.loadingPage')}</h1>`, this.panel.webview.cspSource);
+      this.panel.webview.html = shellHtml(t('web.loading'), `<h1 class="meta">${t('event.loadingPage')}</h1>`, this.panel.webview.cspSource, this.url);
       const d = await api.getEventDetail(this.url);
       this.panel.title = d.name;
       this.render(d);
     } catch (e) {
-      this.panel.webview.html = shellHtml(t('page.loadFailed'), `<h1>${t('page.loadFailed')}</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource);
+      this.panel.webview.html = shellHtml(t('page.loadFailed'), `<h1>${t('page.loadFailed')}</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource, this.url);
     }
   }
 
@@ -118,17 +126,20 @@ class EventDetailPage {
     if (d.relatedEvents.length) {
       parts.push(`<h2>${t('event.related')}</h2>`);
       for (const re of d.relatedEvents) {
-        parts.push(`<p class="matchline"><a href="#" class="extlink" data-url="${escapeHtml(re.url)}">${escapeHtml(re.name)}</a></p>`);
+        parts.push(`<p class="matchline"><a href="#" class="eventlink" data-url="${escapeHtml(re.url)}">${escapeHtml(re.name)}</a></p>`);
       }
     }
 
     const script = `
 const STR = ${JSON.stringify(webviewStrings())};
 document.querySelectorAll('.matchlink').forEach(a => a.addEventListener('click', e => {
-  e.preventDefault(); acquireVsCodeApi().postMessage({ type: 'openMatch', url: a.dataset.url });
+  e.preventDefault(); vsApi().postMessage({ type: 'openMatch', url: a.dataset.url });
+}));
+document.querySelectorAll('.eventlink').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault(); vsApi().postMessage({ type: 'openEvent', url: a.dataset.url });
 }));
 document.querySelectorAll('.extlink').forEach(a => a.addEventListener('click', e => {
-  e.preventDefault(); acquireVsCodeApi().postMessage({ type: 'openLink', url: a.dataset.url });
+  e.preventDefault(); vsApi().postMessage({ type: 'openLink', url: a.dataset.url });
 }));
 // One toggle loads/clears ALL team logos at once.
 document.getElementById('logoToggle')?.addEventListener('click', (e) => {
@@ -150,6 +161,6 @@ document.getElementById('logoToggle')?.addEventListener('click', (e) => {
   });
 });`;
 
-    this.panel.webview.html = shellHtml(`${d.name} | HLTV`, parts.join('') + `<script>${script}</script>`, this.panel.webview.cspSource);
+    this.panel.webview.html = shellHtml(`${d.name} | HLTV`, parts.join('') + `<script>${script}</script>`, this.panel.webview.cspSource, this.url);
   }
 }

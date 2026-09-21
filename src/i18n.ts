@@ -65,6 +65,8 @@ const en: Record<string, string> = {
   'news.embed': 'Embed: {p}',
   'news.comments': 'Comments',
   'news.teams': 'Teams mentioned',
+  'page.openHLTV': 'Open on HLTV.org',
+  'page.refresh': 'Refresh',
   'news.readMore': 'Read more',
   'news.link': 'link',
   // kill feed formatting
@@ -149,6 +151,8 @@ const zh: Record<string, string> = {
   'news.embed': '嵌入: {p}',
   'news.comments': '评论',
   'news.teams': '文中战队',
+  'page.openHLTV': '在 HLTV.org 打开',
+  'page.refresh': '刷新',
   'news.readMore': '阅读更多',
   'news.link': '链接',
   // kill feed formatting

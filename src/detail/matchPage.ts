@@ -2,14 +2,14 @@ import * as vscode from 'vscode';
 import * as api from '../hltv/api';
 import { scorebot } from '../hltv/scorebot';
 import { MatchDetail, StatsTable, StatRow, ScoreFrame, LogItem } from '../hltv/types';
-import { PanelRegistry, shellHtml, escapeHtml } from './webviewCommon';
+import { PanelRegistry, shellHtml, escapeHtml, panelKey } from './webviewCommon';
 import { formatDateTime } from '../util/time';
 import { t, webviewStrings } from '../i18n';
 
 const registry = new PanelRegistry();
 
 export function openMatchDetail(url: string): void {
-  const key = `match:${url}`;
+  const key = panelKey('matches', url) ?? `match:${url}`;
   registry.getOrCreate(key, () => {
     const panel = vscode.window.createWebviewPanel('hltv.matchDetail', 'HLTV Match', vscode.ViewColumn.Active, {
       enableScripts: true,
@@ -60,12 +60,16 @@ class MatchDetailPage {
       if (msg.type === 'openMatch' && msg.url) {
         openMatchDetail(msg.url);
       }
+      if (msg.type === 'refreshPage') {
+        api.clearDetailCache(this.url);
+        void this.load();
+      }
     });
   }
 
   public async load(): Promise<void> {
     try {
-      this.panel.webview.html = shellHtml(t('web.loading'), `<h1 class="meta">${t('match.loadingPage')}</h1>`, this.panel.webview.cspSource);
+      this.panel.webview.html = shellHtml(t('web.loading'), `<h1 class="meta">${t('match.loadingPage')}</h1>`, this.panel.webview.cspSource, this.url);
       this.detail = await api.getMatchDetail(this.url);
       this.panel.title = `${this.detail.team1.name} vs ${this.detail.team2.name}`;
       this.render();
@@ -81,7 +85,7 @@ class MatchDetailPage {
         }
       }
     } catch (e) {
-      this.panel.webview.html = shellHtml(t('page.loadFailed'), `<h1>${t('page.loadFailed')}</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource);
+      this.panel.webview.html = shellHtml(t('page.loadFailed'), `<h1>${t('page.loadFailed')}</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource, this.url);
     }
   }
 
@@ -332,7 +336,7 @@ function renderScoreboard(s) {
   if (html) area.innerHTML = html;
 }
 document.querySelectorAll('.matchlink').forEach(a => a.addEventListener('click', e => {
-  e.preventDefault(); acquireVsCodeApi().postMessage({ type: 'openMatch', url: a.dataset.url });
+  e.preventDefault(); vsApi().postMessage({ type: 'openMatch', url: a.dataset.url });
 }));
 renderStats();`;
 
@@ -340,6 +344,7 @@ renderStats();`;
       `${d.team1.name} vs ${d.team2.name} | HLTV`,
       parts.join('') + `<script>${script}</script>`,
       this.panel.webview.cspSource,
+      this.url,
     );
   }
 

@@ -34,6 +34,13 @@ const caches = {
   newsDetail: snapshotCache<NewsDetail>(),
 };
 
+/** Forget one detail page so the next load refetches it. */
+export function clearDetailCache(path: string): void {
+  caches.matchDetail.delete(path);
+  caches.eventDetail.delete(path);
+  caches.newsDetail.delete(path);
+}
+
 /** Manual refresh: forget every fetched page so the next load refetches. */
 export function clearAllCaches(): void {
   caches.matches.clear();

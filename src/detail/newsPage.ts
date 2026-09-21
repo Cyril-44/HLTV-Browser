@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as api from '../hltv/api';
 import { NewsDetail, NewsBlock, NewsSegment } from '../hltv/types';
-import { PanelRegistry, shellHtml, escapeHtml } from './webviewCommon';
+import { PanelRegistry, shellHtml, escapeHtml, panelKey } from './webviewCommon';
 import { openMatchDetail } from './matchPage';
 import { formatDateTime, formatMatchTime } from '../util/time';
 import { t, webviewStrings } from '../i18n';
@@ -9,7 +9,8 @@ import { t, webviewStrings } from '../i18n';
 const registry = new PanelRegistry();
 
 export function openNewsDetail(url: string): void {
-  registry.getOrCreate(`news:${url}`, () => {
+  const key = panelKey('news', url) ?? `news:${url}`;
+  registry.getOrCreate(key, () => {
     const panel = vscode.window.createWebviewPanel('hltv.newsDetail', 'HLTV News', vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
@@ -39,17 +40,21 @@ class NewsDetailPage {
       if (msg.type === 'openNews' && msg.url) {
         openNewsDetail(msg.url);
       }
+      if (msg.type === 'refreshPage') {
+        api.clearDetailCache(this.url);
+        void this.load();
+      }
     });
   }
 
   public async load(): Promise<void> {
     try {
-      this.panel.webview.html = shellHtml(t('web.loading'), `<h1 class="meta">${t('news.loadingPage')}</h1>`, this.panel.webview.cspSource);
+      this.panel.webview.html = shellHtml(t('web.loading'), `<h1 class="meta">${t('news.loadingPage')}</h1>`, this.panel.webview.cspSource, this.url);
       const d = await api.getNewsDetail(this.url);
       this.panel.title = d.title.slice(0, 40);
       this.render(d);
     } catch (e) {
-      this.panel.webview.html = shellHtml(t('page.loadFailed'), `<h1>${t('page.loadFailed')}</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource);
+      this.panel.webview.html = shellHtml(t('page.loadFailed'), `<h1>${t('page.loadFailed')}</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource, this.url);
     }
   }
 
@@ -174,16 +179,16 @@ document.getElementById('mediaToggle').addEventListener('click', (e) => {
   });
 });
 document.querySelectorAll('.newslink').forEach(a => a.addEventListener('click', e => {
-  e.preventDefault(); acquireVsCodeApi().postMessage({ type: 'openNews', url: a.dataset.url });
+  e.preventDefault(); vsApi().postMessage({ type: 'openNews', url: a.dataset.url });
 }));
 document.querySelectorAll('.matchlink').forEach(a => a.addEventListener('click', e => {
-  e.preventDefault(); acquireVsCodeApi().postMessage({ type: 'openMatch', url: a.dataset.url });
+  e.preventDefault(); vsApi().postMessage({ type: 'openMatch', url: a.dataset.url });
 }));
 document.querySelectorAll('.extlink').forEach(a => a.addEventListener('click', e => {
-  e.preventDefault(); acquireVsCodeApi().postMessage({ type: 'openLink', url: a.dataset.url });
+  e.preventDefault(); vsApi().postMessage({ type: 'openLink', url: a.dataset.url });
 }));`;
 
-    this.panel.webview.html = shellHtml(`${d.title} | HLTV`, parts.join('') + `<script>${script}</script>`, this.panel.webview.cspSource);
+    this.panel.webview.html = shellHtml(`${d.title} | HLTV`, parts.join('') + `<script>${script}</script>`, this.panel.webview.cspSource, this.url);
   }
 }
 

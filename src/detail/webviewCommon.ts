@@ -1,11 +1,21 @@
 import * as vscode from 'vscode';
-import { htmlLang } from '../i18n';
+import { htmlLang, t } from '../i18n';
 
 /**
  * Shared plain-looking webview shell: VSCode theme variables only, no custom
  * backgrounds, no decorations — text-first per the project's design rules.
  */
-export function shellHtml(title: string, body: string, cspSource: string): string {
+/**
+ * Normalize a detail-page key to the numeric id: HLTV serves the same match /
+ * event / news under multiple slugs, and full-URL keys would open duplicate
+ * panels for what is visually the same page.
+ */
+export function panelKey(kind: string, url: string): string | null {
+  const m = new RegExp(`/${kind}/(\\d+)`).exec(url);
+  return m ? `${kind}:${m[1]}` : null;
+}
+
+export function shellHtml(title: string, body: string, cspSource: string, pageUrl?: string): string {
   return `<!DOCTYPE html>
 <html lang="${htmlLang()}">
 <head>
@@ -50,8 +60,12 @@ export function shellHtml(title: string, body: string, cspSource: string): strin
     padding: 8px 12px; margin: 0.5em 0; display: inline-block;
   }
   .media-toggle {
-    position: fixed; top: 12px; right: 18px; z-index: 10;
+    position: fixed; top: 12px; right: 112px; z-index: 10;
   }
+  .page-actions {
+    position: fixed; top: 12px; right: 18px; z-index: 10; display: flex; gap: 6px;
+  }
+  .page-actions button { font-size: 1em; padding: 2px 12px; }
   .media-slot.filled .placeholder { display: none; }
   /* Eco-adjusted toggle: body.eco swaps traditional <-> eco-adjusted columns */
   body:not(.eco) .eco { display: none; }
@@ -77,6 +91,32 @@ export function shellHtml(title: string, body: string, cspSource: string): strin
 </head>
 <body>
 ${body}
+${pageUrl ? `<div class="page-actions">
+  <button id="btnOpenHLTV" title="${t('page.openHLTV')}">↗</button>
+  <button id="btnRefresh" title="${t('page.refresh')}">⟳</button>
+</div>` : ''}
+<script>
+// acquireVsCodeApi may only be called once per page; every consumer (this
+// toolbar and the page scripts below) goes through the same memoized helper.
+function vsApi() {
+  if (!window.__vscodeApi) {
+    try { window.__vscodeApi = acquireVsCodeApi(); } catch (e) {}
+  }
+  return window.__vscodeApi;
+}
+(function () {
+  var open = document.getElementById('btnOpenHLTV');
+  var refresh = document.getElementById('btnRefresh');
+  if (open) open.addEventListener('click', function () {
+    var api = vsApi();
+    if (api) api.postMessage({ type: 'openLink', url: 'https://www.hltv.org${pageUrl ?? ''}' });
+  });
+  if (refresh) refresh.addEventListener('click', function () {
+    var api = vsApi();
+    if (api) api.postMessage({ type: 'refreshPage' });
+  });
+})();
+</script>
 </body>
 </html>`;
 }
