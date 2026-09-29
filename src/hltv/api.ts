@@ -64,9 +64,10 @@ export function getMatches(): Promise<Match[]> {
     parseMatchesPage(await html('/matches')));
 }
 
-export function getResults(): Promise<ResultMatch[]> {
-  return caches.results.wrap('results', async () =>
-    parseResultsPage(await html('/results')));
+/** Results page by offset (100 per page) — powers "load more" history. */
+export function getResults(offset = 0): Promise<ResultMatch[]> {
+  return caches.results.wrap(`results:${offset}`, async () =>
+    parseResultsPage(await html(offset ? `/results?offset=${offset}` : '/results')));
 }
 
 export function getEvents(): Promise<EventSummary[]> {

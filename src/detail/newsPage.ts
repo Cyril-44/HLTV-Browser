@@ -3,6 +3,7 @@ import * as api from '../hltv/api';
 import { NewsDetail, NewsBlock, NewsSegment } from '../hltv/types';
 import { PanelRegistry, shellHtml, escapeHtml, panelKey } from './webviewCommon';
 import { openMatchDetail } from './matchPage';
+import { openEventDetail } from './eventPage';
 import { formatDateTime, formatMatchTime } from '../util/time';
 import { t, webviewStrings } from '../i18n';
 
@@ -24,8 +25,35 @@ export function openNewsDetail(url: string): void {
 
 function renderSegments(segments: NewsSegment[]): string {
   return segments
-    .map((seg) => `${seg.bold ? '<strong>' : ''}${seg.italic ? '<em>' : ''}${escapeHtml(seg.text)}${seg.italic ? '</em>' : ''}${seg.bold ? '</strong>' : ''}`)
+    .map((seg) => {
+      const inner = `${seg.italic ? '<em>' : ''}${escapeHtml(seg.text).replace(/\n/g, '<br>')}${seg.italic ? '</em>' : ''}`;
+      const wrapped = seg.bold ? `<strong>${inner}</strong>` : inner;
+      return seg.href ? `<a href="#" class="inlinelink" data-href="${escapeHtml(seg.href)}">${wrapped}</a>` : wrapped;
+    })
     .join('');
+}
+
+function renderBlockList(blocks: NewsBlock[]): string {
+  const parts: string[] = [];
+  for (const block of blocks) {
+    switch (block.kind) {
+      case 'text':
+        parts.push(`<p>${renderSegments(block.segments)}</p>`);
+        break;
+      case 'quote':
+        parts.push(`<blockquote>${renderSegments(block.segments)}</blockquote>`);
+        break;
+      case 'hr':
+        parts.push('<hr/>');
+        break;
+      case 'teamList':
+        parts.push(`<div class="teamgrid">${block.teams.map((x) => `<span>${escapeHtml(x)}</span>`).join('')}</div>`);
+        break;
+      default:
+        break;
+    }
+  }
+  return parts.join('');
 }
 
 class NewsDetailPage {
@@ -43,6 +71,17 @@ class NewsDetailPage {
       if (msg.type === 'refreshPage') {
         api.clearDetailCache(this.url);
         void this.load();
+      }
+      if (msg.type === 'inlineLink' && msg.url) {
+        if (/^\/matches\//.test(msg.url)) {
+          openMatchDetail(msg.url);
+        } else if (/^\/events\//.test(msg.url)) {
+          openEventDetail(msg.url);
+        } else if (/^\/news\//.test(msg.url)) {
+          openNewsDetail(msg.url);
+        } else {
+          void vscode.env.openExternal(vscode.Uri.parse(msg.url.startsWith('http') ? msg.url : 'https://www.hltv.org' + msg.url));
+        }
       }
     });
   }
@@ -72,12 +111,18 @@ class NewsDetailPage {
     for (const block of d.blocks) {
       switch (block.kind) {
         case 'text':
-          parts.push(`<p>${renderSegments(block.segments)}${block.link ? ` <a href="#" class="extlink" data-url="${escapeHtml(block.link)}">[${t('news.link')}]</a>` : ''}</p>`);
+          parts.push(`<p>${renderSegments(block.segments)}</p>`);
           break;
         case 'quote':
           parts.push(
             `<blockquote>${renderSegments(block.segments)}${block.author ? `<footer class="muted">— ${escapeHtml(block.author)}</footer>` : ''}</blockquote>`,
           );
+          break;
+        case 'hr':
+          parts.push('<hr/>');
+          break;
+        case 'teamList':
+          parts.push(`<div class="teamgrid">${block.teams.map((x) => `<span>${escapeHtml(x)}</span>`).join('')}</div>`);
           break;
         case 'match': {
           const mapsLine = block.maps.map((m) => `${escapeHtml(m.name)} ${escapeHtml(m.score1)}-${escapeHtml(m.score2)}`).join(' · ');
@@ -125,6 +170,15 @@ class NewsDetailPage {
           );
           break;
       }
+    }
+
+    for (const frag of d.fragments) {
+      const meta = [frag.timeAgo, frag.author].filter(Boolean).map(escapeHtml).join(' · ');
+      parts.push(`<h2>${escapeHtml(frag.headline)}</h2>`);
+      if (meta) {
+        parts.push(`<p class="meta">${meta}</p>`);
+      }
+      parts.push(renderBlockList(frag.blocks));
     }
 
     if (d.teams.length) {
@@ -178,6 +232,9 @@ document.getElementById('mediaToggle').addEventListener('click', (e) => {
     }
   });
 });
+document.querySelectorAll('.inlinelink').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault(); vsApi().postMessage({ type: 'inlineLink', url: a.dataset.href });
+}));
 document.querySelectorAll('.newslink').forEach(a => a.addEventListener('click', e => {
   e.preventDefault(); vsApi().postMessage({ type: 'openNews', url: a.dataset.url });
 }));

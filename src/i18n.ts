@@ -20,6 +20,7 @@ const en: Record<string, string> = {
   'card.stage': 'Stage',
   'card.bpSteps': '{n} steps (see detail page)',
   'view.loadError': 'Load failed: {msg}',
+  'view.loadMore': 'Load more results…',
   // match detail page
   'web.loading': 'Loading…',
   'match.loadingPage': 'Loading match page…',
@@ -106,6 +107,7 @@ const zh: Record<string, string> = {
   'card.stage': '阶段',
   'card.bpSteps': '{n} 步（详见详情页）',
   'view.loadError': '加载失败: {msg}',
+  'view.loadMore': '加载更多赛果…',
   // match detail page
   'web.loading': '加载中…',
   'match.loadingPage': '正在加载比赛页面…',

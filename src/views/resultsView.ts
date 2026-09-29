@@ -68,6 +68,10 @@ export class ResultNode extends vscode.TreeItem {
 export class ResultsView implements vscode.TreeDataProvider<ResultNode | vscode.TreeItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<ResultNode | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+  private loaded: ResultNode[] = [];
+  private nextOffset = 0;
+  private hasMore = true;
+  private loading = false;
 
   getTreeItem(element: ResultNode | vscode.TreeItem): vscode.TreeItem {
     return element;
@@ -80,16 +84,42 @@ export class ResultsView implements vscode.TreeDataProvider<ResultNode | vscode.
     if (element) {
       return [];
     }
-    try {
-      const results = await api.getResults();
-      return results.map((r) => new ResultNode(r, (node) => this._onDidChangeTreeData.fire(node)));
-    } catch (e) {
-      return [errorItem(e)];
+    if (this.loaded.length === 0 && this.hasMore) {
+      await this.loadMore();
     }
+    if (!this.hasMore) {
+      return this.loaded;
+    }
+    const more = new vscode.TreeItem(t('view.loadMore'));
+    more.contextValue = 'hltv-card';
+    more.iconPath = new vscode.ThemeIcon('more');
+    more.command = { command: 'hltv.loadMoreResults', title: '' };
+    return [...this.loaded, more];
+  }
+
+  public async loadMore(): Promise<void> {
+    if (this.loading || !this.hasMore) {
+      return;
+    }
+    this.loading = true;
+    try {
+      const page = await api.getResults(this.nextOffset);
+      this.nextOffset += page.length;
+      this.hasMore = page.length > 0;
+      for (const r of page) {
+        this.loaded.push(new ResultNode(r, (node) => this._onDidChangeTreeData.fire(node)));
+      }
+    } finally {
+      this.loading = false;
+    }
+    this._onDidChangeTreeData.fire(undefined);
   }
 
   public async refresh(): Promise<void> {
     await api.clearAllCaches();
+    this.loaded = [];
+    this.nextOffset = 0;
+    this.hasMore = true;
     this._onDidChangeTreeData.fire(undefined);
   }
 }

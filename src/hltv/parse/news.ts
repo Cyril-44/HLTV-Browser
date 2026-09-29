@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { CheerioAPI } from 'cheerio';
-import { NewsItem, NewsDetail, NewsBlock, NewsComment, NewsSegment, NewsTeamMention } from '../types';
+import { NewsItem, NewsDetail, NewsBlock, NewsComment, NewsSegment, NewsTeamMention, NewsFragment } from '../types';
 
 export function parseNewsList(html: string): NewsItem[] {
   const $ = cheerio.load(html);
@@ -45,6 +45,25 @@ export function parseNewsArticle(html: string, url: string): NewsDetail {
     }
   }
 
+  // Short-news weeklies are built from fragments: headline + time + author +
+  // a per-item body (paragraphs, images, embedded match widgets).
+  const fragments: NewsFragment[] = [];
+  for (const frag of body.find('.fragment')) {
+    const $frag = $(frag);
+    const fragBlocks: NewsBlock[] = [];
+    for (const child of $frag.find('.fragment-content').first().children().toArray()) {
+      pushBlock($, child, fragBlocks, teams, seenTeams);
+    }
+    fragments.push({
+      id: $frag.attr('id') ?? '',
+      timeAgo: $frag.find('.fragment-time').first().text().replace(/\s+/g, ' ').trim(),
+      author: $frag.find('.fragment-author').first().text().replace(/\s+/g, ' ').trim(),
+      authorUrl: $frag.find('.fragment-author').attr('href') ?? '',
+      headline: $frag.find('.fragment-headline').first().text().replace(/\s+/g, ' ').trim(),
+      blocks: fragBlocks,
+    });
+  }
+
   // Team hover cards live OUTSIDE the body container (siblings within the
   // article); collect each mentioned team's roster, deduplicated.
   for (const teamBox of article.find('.newsitem-tooltips.team-tooltip').toArray()) {
@@ -73,7 +92,7 @@ export function parseNewsArticle(html: string, url: string): NewsDetail {
     collectComments($, forum, 0, comments);
   }
 
-  return { url, title, author, date, intro, blocks, teams, comments };
+  return { url, title, author, date, intro, blocks, fragments, teams, comments };
 }
 
 type AnyNode = { tagName?: string };
@@ -83,6 +102,24 @@ function pushBlock($: CheerioAPI, node: AnyNode, blocks: NewsBlock[], teams: New
   const tag = (node.tagName ?? '').toLowerCase();
   const cls = el.attr('class') ?? '';
 
+  if (tag === 'hr') {
+    blocks.push({ kind: 'hr' });
+    return;
+  }
+  if (/twocol/.test(cls)) {
+    // Two-column team list (flags + team links separated by <br>)
+    const teams = el.find('a[href^="/team/"]')
+      .map((_, x) => $(x).text().replace(/\s+/g, ' ').trim())
+      .get()
+      .filter(Boolean);
+    if (teams.length) {
+      blocks.push({ kind: 'teamList', teams });
+    }
+    return;
+  }
+  if (/^fragments?$/.test(cls) || /fragment(?!s)/.test(cls)) {
+    return; // short-news fragments are collected separately in parseNewsArticle
+  }
   if (/newsitem-match-result/.test(cls)) {
     // Embedded match result widget; the stats table is an adjacent sibling.
     const eventName = el.find('.newsitem-match-result-top a').first().text().replace(/\s+/g, ' ').trim();
@@ -247,11 +284,10 @@ function pushBlock($: CheerioAPI, node: AnyNode, blocks: NewsBlock[], teams: New
     }
     // normalize whitespace inside segments while keeping bold/italic runs
     normalizeSegments(segments);
-    const link = el.find('a[href]').not('a[href*="hltv.org"]').first().attr('href');
     if (/news-block/.test(cls) && el.closest('blockquote').length) {
       blocks.push({ kind: 'quote', segments });
     } else {
-      blocks.push({ kind: 'text', segments, link });
+      blocks.push({ kind: 'text', segments });
     }
     return;
   }
@@ -277,37 +313,48 @@ function pushBlock($: CheerioAPI, node: AnyNode, blocks: NewsBlock[], teams: New
  * Walk inline content preserving bold (strong/b — HLTV uses them for
  * interview questions, leads and entity names) and italic (em/i) runs.
  */
-function collectSegments($: CheerioAPI, node: unknown, out: NewsSegment[]): NewsSegment[] {
-  const push = (text: string, bold: boolean, italic: boolean): void => {
+function collectSegments($: CheerioAPI, node: unknown, out: NewsSegment[] = []): NewsSegment[] {
+  const append = (target: NewsSegment[], text: string, bold: boolean, italic: boolean, href?: string): void => {
     if (!text) {
       return;
     }
-    const last = out[out.length - 1];
-    if (last && last.bold === bold && last.italic === italic) {
+    const last = target[target.length - 1];
+    if (last && last.bold === bold && last.italic === italic && last.href === href) {
       last.text += text;
     } else {
-      out.push({ text, bold, italic });
+      target.push({ text, bold, italic, href: href || undefined });
     }
   };
-  const walk = (child: unknown, bold: boolean, italic: boolean): void => {
+  const walk = (child: unknown, bold: boolean, italic: boolean, target: NewsSegment[]): void => {
     const $child = $(child as never);
     if ((child as { type?: string }).type === 'text') {
-      push($child.text(), bold, italic);
+      append(target, $child.text(), bold, italic);
       return;
     }
     const tag = ((child as { tagName?: string }).tagName ?? '').toLowerCase();
-    const nextBold = bold || tag === 'strong' || tag === 'b';
-    const nextItalic = italic || tag === 'em' || tag === 'i';
     if (tag === 'br') {
-      push(' ', bold, italic);
+      append(target, '\n', bold, italic);
       return;
     }
+    if (tag === 'a') {
+      const href = $child.attr('href') ?? '';
+      const sub: NewsSegment[] = [];
+      for (const inner of $child.contents().toArray()) {
+        walk(inner, bold, italic, sub);
+      }
+      for (const seg of sub) {
+        append(target, seg.text, seg.bold, seg.italic, href);
+      }
+      return;
+    }
+    const nextBold = bold || tag === 'strong' || tag === 'b';
+    const nextItalic = italic || tag === 'em' || tag === 'i';
     for (const inner of $child.contents().toArray()) {
-      walk(inner, nextBold, nextItalic);
+      walk(inner, nextBold, nextItalic, target);
     }
   };
   for (const child of $(node as never).contents().toArray()) {
-    walk(child, false, false);
+    walk(child, false, false, out);
   }
   return out;
 }

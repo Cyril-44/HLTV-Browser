@@ -36,6 +36,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand('hltv.refreshMatches', () => void matchesView.refresh()),
     vscode.commands.registerCommand('hltv.refreshResults', () => void resultsView.refresh()),
+    vscode.commands.registerCommand('hltv.loadMoreResults', () => void resultsView.loadMore()),
     vscode.commands.registerCommand('hltv.refreshEvents', () => void eventsView.refresh()),
     vscode.commands.registerCommand('hltv.refreshNews', () => void newsView.refresh()),
     vscode.commands.registerCommand('hltv.openMatchDetail', (node: MatchNode | ResultNode) => {
