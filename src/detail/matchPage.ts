@@ -330,44 +330,22 @@ function prependLog(lines, reset, bombPlanted, roundEnded, roundStarted) {
   }
 }
 
-// ---- round history: two-row table like the site, one row per team, with
-// site-style mini icons (bomb / cutters / skull / clock) ----
-function iconSvg(k) {
-  var body = {
-    bomb: '<circle cx="6.5" cy="8.5" r="4"/><path d="M9 5.5L11.5 3M11.5 3l1.6.5M11.5 3l-.4-1.6"/>',
-    defuse: '<path d="M4 11l7-8M11 11l-7-8"/><circle cx="3" cy="11.5" r="1.7"/><circle cx="11" cy="11.5" r="1.7"/>',
-    elimination: '<path d="M7 2.2a4.6 4.6 0 00-4.6 4.6c0 1.8 1 3.3 2.4 4V13h4.4v-2.2c1.4-.7 2.4-2.2 2.4-4A4.6 4.6 0 007 2.2z"/><path d="M5.2 6.4h.1M8.8 6.4h.01"/>',
-    time: '<circle cx="7" cy="7" r="5.2"/><path d="M7 4v3.2l2.2 1.5"/>'
-  }[k] || '<path d="M7 2.6l1.3 2.8 3 .4-2.2 2.1.5 3-2.6-1.4-2.6 1.4.5-3L2.7 5.8l3-.4z"/>';
-  return '<svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
-}
-var ICON_KEYS = [['bomb', ['bomb', 'explosion', 'bombed']], ['defuse', ['defuse', 'defused', 'cut']], ['elimination', ['elimination', 'eliminate', 'kill', 'terrorists_win', 'cts_win']], ['time', ['time', 'timeout']]];
-function iconFor(k) {
-  var s = String(k || '').toLowerCase();
-  for (var i = 0; i < ICON_KEYS.length; i++) {
-    for (var j = 0; j < ICON_KEYS[i][1].length; j++) {
-      if (s.indexOf(ICON_KEYS[i][1][j]) >= 0) return ICON_KEYS[i][0];
-    }
-  }
-  return '';
-}
-// winner side implied by the entry type (history entries are round-outcome
-// descriptors: Terrorists_Win / CTs_Win / Target_Bombed / Bomb_Defused / lost)
+// ---- round history: two left-aligned rows, one per team; won rounds show
+// the site's abbreviation letters (B bomb / K killed / S saved / T time),
+// no fills ----
 function roundWinnerSide(x) {
   var t = String((x && typeof x === 'object' ? (x.type || x.winType || '') : x) || '').toLowerCase();
   if (!t) return '';
   if (t.indexOf('terrorists_win') >= 0 || t.indexOf('target_bombed') >= 0 || t.indexOf('bomb_explod') >= 0) return 'T';
-  if (t.indexOf('cts_win') >= 0 || t.indexOf('ct_win') >= 0 || t.indexOf('defuse') >= 0) return 'CT';
+  if (t.indexOf('cts_win') >= 0 || t.indexOf('ct_win') >= 0 || t.indexOf('defuse') >= 0 || t.indexOf('saved') >= 0) return 'CT';
   return '?';
 }
-function roundCell(entry, rowSide) {
-  var t = String((entry && typeof entry === 'object' ? (entry.type || entry.winType || entry.method || '') : entry) || '').toLowerCase();
-  var won = roundWinnerSide(entry) === rowSide;
-  if (!won) {
-    return '<td class="rh-lost"><span></span></td>';
-  }
-  var iconKey = iconFor(t);
-  return '<td class="rh-win' + (iconKey ? '' : ' rh-plain') + '">' + (iconKey ? iconSvg(iconKey) : '·') + '</td>';
+function roundLetter(x) {
+  var t = String((x && typeof x === 'object' ? (x.type || x.winType || '') : x) || '').toLowerCase();
+  if (t.indexOf('defuse') >= 0 || t.indexOf('saved') >= 0) return 'S';
+  if (t.indexOf('bomb') >= 0) return 'B'; // Target_Bombed (check after defuse)
+  if (t.indexOf('time') >= 0 || t.indexOf('expire') >= 0) return 'T';
+  return 'K'; // elimination win
 }
 var sbDebugSent = false;
 function renderRoundHistory(s) {
@@ -378,11 +356,19 @@ function renderRoundHistory(s) {
   var t = pick(s.terroristMatchHistory);
   if (!ct.length && !t.length) { el.textContent = ''; return; }
   var n = Math.max(ct.length, t.length);
-  var r1 = '', r2 = '';
-  for (var i = 0; i < n; i++) { r1 += roundCell(ct[i], 'CT'); r2 += roundCell(t[i], 'T'); }
+  var mkRow = function (name, arr, side) {
+    var cells = '';
+    for (var i = 0; i < n; i++) {
+      if (roundWinnerSide(arr[i]) === side) {
+        cells += '<span class="rh-w">' + roundLetter(arr[i]) + '</span>';
+      } else {
+        cells += '<span class="rh-x"></span>'; // empty slot keeps rows aligned
+      }
+    }
+    return '<div class="rh-row"><span class="rh-team">' + esc(name) + '</span>' + cells + '</div>';
+  };
   el.innerHTML = '<div class="muted" style="font-size:0.85em">' + esc(STR.roundLabel) + '</div>' +
-    '<table class="rhist"><tr><th class="rh-team">' + esc(s.ctTeamName || 'CT') + '</th>' + r1 + '</tr>' +
-    '<tr><th class="rh-team">' + esc(s.terroristTeamName || 'T') + '</th>' + r2 + '</tr></table>';
+    '<div class="rhist">' + mkRow(s.ctTeamName || 'CT', ct, 'CT') + mkRow(s.terroristTeamName || 'T', t, 'T') + '</div>';
   if (!sbDebugSent) {
     sbDebugSent = true;
     var api = (typeof vsApi === 'function') ? vsApi() : null;
