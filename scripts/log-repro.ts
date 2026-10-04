@@ -5,7 +5,7 @@
  * runs it through the REAL formatLogItems, and checks RoundEnd lines survive
  * format + the page-side dedup/trim logic.
  */
-import { formatLogItems } from '../src/detail/matchPage';
+import { formatLogItems, normalizeReplay } from '../src/detail/matchPage';
 import { LogItem } from '../src/hltv/types';
 
 function buildBacklog(): LogItem[] {
@@ -39,25 +39,35 @@ function buildBacklog(): LogItem[] {
 }
 
 function main(): void {
-  const backlog = buildBacklog();
-  console.log('backlog items:', backlog.length);
-  const lines = formatLogItems(backlog);
-  const roundEnds = lines.filter((l) => l.text.includes('胜') || l.text.includes('win'));
-  const roundStarts = lines.filter((l) => l.text.includes('回合') || l.text.includes('Round'));
-  console.log('lines:', lines.length, '| roundEnd lines:', roundEnds.length, '| roundStart lines:', roundStarts.length);
-  console.log('sample roundEnd:', JSON.stringify(roundEnds[0]));
-  console.log('sample kill:', JSON.stringify(lines.find((l) => l.text.includes('['))));
-  // page-side dedup simulation: only CONSECUTIVE identical texts collapse
-  let dupCollapsed = 0;
-  const seen: string[] = [];
-  for (const l of lines) {
-    if (seen.length && seen[seen.length - 1] === l.text && l.kind === 'normal') { dupCollapsed++; continue; }
-    seen.push(l.text);
+  // --- scenario 1: chronological replay with warmup spam ---
+  const warmup: LogItem[] = [];
+  for (let i = 0; i < 80; i++) {
+    warmup.push({ Kill: { killerNick: `w${i % 5}`, victimNick: `v${i % 7}`, weapon: 'usp' } });
   }
-  console.log('after dedup:', seen.length, '(collapsed', dupCollapsed + ')');
-  const finalRoundEnds = seen.filter((x) => x.includes('胜') || x.includes('win'));
-  const trimmed = seen.slice(-200); // logbox keeps newest 200
-  console.log('roundEnd after dedup:', finalRoundEnds.length, '| within newest 200:', trimmed.filter((x) => x.includes('胜') || x.includes('win')).length);
+  const chrono = [...warmup, ...buildBacklog()];
+  const norm = normalizeReplay(chrono);
+  const lines = formatLogItems(norm);
+  const warmupKills = lines.filter((l) => / \[usp\] /.test(l.text)).length;
+  console.log('scenario1: items', chrono.length, '->', norm.length,
+    '| warmup kills left:', warmupKills,
+    '| marker:', JSON.stringify(lines.find((l) => l.text.includes('热身') || l.text.includes('warmup'))));
+  const ends = lines.filter((l) => l.text.includes('胜') || l.text.includes('win'));
+  const first = ends.findIndex((l) => /\d+:\d+/.test(l.text));
+  console.log('  roundEnd lines:', ends.length, '| first has scores:', first >= 0, JSON.stringify(ends[first]?.text));
+
+  // --- scenario 2: newest-first replay (the suspected live shape) ---
+  const reversed = [...chrono].reverse();
+  const norm2 = normalizeReplay(reversed);
+  const lines2 = formatLogItems(norm2);
+  const ends2 = lines2.filter((l) => /\d+:\d+/.test(l.text) && (l.text.includes('胜') || l.text.includes('win')));
+  const totals = ends2.map((l) => {
+    const m = /(\d+):(\d+)/.exec(l.text);
+    return m ? Number(m[1]) + Number(m[2]) : -1;
+  });
+  const ascending = totals.every((v, i) => i === 0 || v >= totals[i - 1]);
+  console.log('scenario2: reversed input', reversed.length, '-> normalized', norm2.length,
+    '| roundEnd score sequence ascending (oldest→newest in array):', ascending,
+    '| sample:', JSON.stringify(totals.slice(0, 8)));
 }
 
 main();

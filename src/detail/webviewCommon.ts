@@ -86,13 +86,14 @@ export function shellHtml(title: string, body: string, cspSource: string, pageUr
   .ptable-fixed td.nw { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ptable-fixed tr.team-head td { border-top: 1px solid var(--vscode-panel-border); padding-top: 6px; color: var(--vscode-foreground); }
   .ptable-fixed tr.team-head:first-child td { border-top: none; }
-  /* round history: two left-aligned flex rows; won rounds carry the site's
-     abbreviation letters (B/K/S/…), no fills */
-  .rhist { display: inline-block; margin: 0.3em 0 0.5em; }
-  .rh-row { display: flex; align-items: center; margin: 2px 0; }
-  .rh-team { flex: 0 1 auto; max-width: 150px; margin-right: 10px; font-size: 0.85em; color: var(--vscode-descriptionForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .rh-w { flex: 0 0 17px; width: 17px; height: 17px; line-height: 17px; margin-right: 2px; text-align: center; font-size: 10px; font-weight: 600; color: var(--vscode-foreground); border: 1px solid var(--vscode-panel-border); border-radius: 2px; }
-  .rh-x { flex: 0 0 17px; width: 17px; height: 17px; margin-right: 2px; }
+  /* round history: three-row table (round numbers / team / team), fixed col
+     widths so every round lines up regardless of team-name lengths */
+  .rhist { border-collapse: collapse; margin: 0.3em 0 0.5em; }
+  .rhist th, .rhist td { padding: 1px 2px; font-weight: 400; text-align: center; }
+  .rhist .rh-num th, .rhist .rh-num td { font-size: 10px; color: var(--vscode-descriptionForeground); }
+  .rhist .rh-team { text-align: left; font-size: 0.85em; color: var(--vscode-descriptionForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 104px; }
+  .rhist td.rh-w { width: 18px; height: 17px; line-height: 17px; font-size: 10px; font-weight: 600; color: var(--vscode-foreground); border: 1px solid var(--vscode-panel-border); border-radius: 2px; }
+  .rhist td.rh-x { width: 18px; height: 17px; }
   #roundClock { font-family: var(--vscode-editor-font-family); }
   a { color: var(--vscode-textLink-foreground); }
 .matchline { font-size: 1.05em; margin: 0.2em 0; }

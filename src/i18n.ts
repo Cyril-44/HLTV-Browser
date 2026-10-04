@@ -79,6 +79,7 @@ const en: Record<string, string> = {
   'news.link': 'link',
   // kill feed formatting
   'log.roundStart': '—— Round start ——',
+  'log.warmup': '—— warmup ({n} kills omitted) ——',
   'log.restart': '—— Restart ——',
   'log.join': '→ {p} joined',
   'log.quit': '← {p} left',
@@ -174,6 +175,7 @@ const zh: Record<string, string> = {
   'news.link': '链接',
   // kill feed formatting
   'log.roundStart': '—— 回合开始 ——',
+  'log.warmup': '—— 热身（已省略 {n} 次击杀）——',
   'log.restart': '—— 重启 ——',
   'log.join': '→ {p} 加入',
   'log.quit': '← {p} 离开',

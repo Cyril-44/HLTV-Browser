@@ -31,9 +31,10 @@ class MatchDetailPage {
       void this.panel.webview.postMessage({ type: 'score', ...text });
     },
     onLog: (items: LogItem[], reset: boolean): void => {
-      const bombPlanted = items.some((i) => 'BombPlanted' in i);
-      const roundEnded = items.some((i) => 'RoundEnd' in i);
-      const roundStarted = items.some((i) => /roundstart/i.test(String(Object.keys(i)[0] ?? '')));
+      const list = reset ? normalizeReplay(items) : items;
+      const bombPlanted = list.some((i) => 'BombPlanted' in i);
+      const roundEnded = list.some((i) => 'RoundEnd' in i);
+      const roundStarted = list.some((i) => /roundstart/i.test(String(Object.keys(i)[0] ?? '')));
       if (reset) {
         // backlog diagnostic: if old-round RoundEnd separators are missing on
         // the page, this line shows exactly which event types the scorebot
@@ -51,7 +52,7 @@ class MatchDetailPage {
       }
       void this.panel.webview.postMessage({
         type: 'log',
-        lines: formatLogItems(items),
+        lines: formatLogItems(list),
         reset,
         bombPlanted,
         roundEnded,
@@ -315,7 +316,7 @@ function prependLog(lines, reset, bombPlanted, roundEnded, roundStarted) {
     div.textContent = text;
     box.insertBefore(div, box.firstChild);
   }
-  while (box.children.length > 200) box.removeChild(box.lastChild);
+  while (box.children.length > 300) box.removeChild(box.lastChild);
   if (bombPlanted) {
     if (stampAtPlant) plantClockText = stampAtPlant;
     setClock(clock ? Math.min(clock.ms, 40000) : 40000);
@@ -356,19 +357,24 @@ function renderRoundHistory(s) {
   var t = pick(s.terroristMatchHistory);
   if (!ct.length && !t.length) { el.textContent = ''; return; }
   var n = Math.max(ct.length, t.length);
+  if (!n) { el.textContent = ''; return; }
+  // three-row TABLE (round numbers / team A / team B): fixed col widths make
+  // per-round alignment independent of team-name lengths
+  var cols = '<colgroup><col style="width:104px">';
+  for (var c = 0; c < n; c++) { cols += '<col style="width:18px">'; }
+  cols += '</colgroup>';
+  var numRow = '<tr class="rh-num"><th>' + esc(STR.roundLabel) + '</th>';
+  for (var i = 0; i < n; i++) { numRow += '<td>' + (i + 1) + '</td>'; }
+  numRow += '</tr>';
   var mkRow = function (name, arr, side) {
-    var cells = '';
-    for (var i = 0; i < n; i++) {
-      if (roundWinnerSide(arr[i]) === side) {
-        cells += '<span class="rh-w">' + roundLetter(arr[i]) + '</span>';
-      } else {
-        cells += '<span class="rh-x"></span>'; // empty slot keeps rows aligned
-      }
+    var r = '<tr><th class="rh-team">' + esc(name) + '</th>';
+    for (var j = 0; j < n; j++) {
+      r += roundWinnerSide(arr[j]) === side ? '<td class="rh-w">' + roundLetter(arr[j]) + '</td>' : '<td class="rh-x"></td>';
     }
-    return '<div class="rh-row"><span class="rh-team">' + esc(name) + '</span>' + cells + '</div>';
+    return r + '</tr>';
   };
-  el.innerHTML = '<div class="muted" style="font-size:0.85em">' + esc(STR.roundLabel) + '</div>' +
-    '<div class="rhist">' + mkRow(s.ctTeamName || 'CT', ct, 'CT') + mkRow(s.terroristTeamName || 'T', t, 'T') + '</div>';
+  el.innerHTML = '<table class="rhist">' + cols + numRow +
+    mkRow(s.ctTeamName || 'CT', ct, 'CT') + mkRow(s.terroristTeamName || 'T', t, 'T') + '</table>';
   if (!sbDebugSent) {
     sbDebugSent = true;
     var api = (typeof vsApi === 'function') ? vsApi() : null;
@@ -448,6 +454,44 @@ renderStats();`;
   }
 }
 
+/**
+ * Normalize a scorebot replay (the initial full-log batch):
+ * 1. Direction — replays may arrive newest-first (RoundEnd total scores
+ *    descend); the page renders newest-on-top by inserting each array item
+ *    at the top, so a newest-first array inverts to oldest-on-top and the
+ *    200-line trim then eats the REAL recent rounds while warmup junk stays
+ *    visible. Detect via score progression and flip when needed.
+ * 2. Warmup — kill-type events before the first RoundStart are practice
+ *    spam; replace them with a single "omitted" marker line.
+ */
+export function normalizeReplay(items: LogItem[]): LogItem[] {
+  const keyOf = (it: LogItem): string => Object.keys(it)[0] ?? '';
+  const roundEndTotal = (it: LogItem): number | null => {
+    const v = Object.values(it)[0] as Record<string, unknown> | undefined;
+    if (!v || typeof v !== 'object') {
+      return null;
+    }
+    const ct = Number(v.counterTerroristScore ?? v.ctScore ?? NaN);
+    const t = Number(v.terroristScore ?? v.tScore ?? NaN);
+    return Number.isFinite(ct) && Number.isFinite(t) ? ct + t : null;
+  };
+  const ends = items
+    .filter((it) => /roundend/i.test(keyOf(it)))
+    .map(roundEndTotal)
+    .filter((x): x is number => x != null);
+  let out = ends.length >= 2 && ends[0] > ends[ends.length - 1] ? [...items].reverse() : items;
+  const firstRound = out.findIndex((it) => /roundstart/i.test(keyOf(it)));
+  if (firstRound > 0) {
+    const head = out.slice(0, firstRound);
+    const isKillType = (it: LogItem): boolean => /^(kill|assist|suicide)/i.test(keyOf(it));
+    const omitted = head.filter(isKillType).length;
+    if (omitted) {
+      out = [...head.filter((it) => !isKillType(it)), { Warmup: { n: omitted } } as unknown as LogItem, ...out.slice(firstRound)];
+    }
+  }
+  return out;
+}
+
 interface PendingKill {
   index: number;
   killer: string;
@@ -485,6 +529,12 @@ export function formatLogItems(items: LogItem[]): LogLine[] {
   };
   for (const item of items) {
     const [key, value] = Object.entries(item)[0] ?? [];
+    if (/^warmup/i.test(key)) {
+      push({ text: t('log.warmup', { n: String((value as { n?: number })?.n ?? '') }), kind: 'notime' });
+      pending = null;
+      pendingAssist = null;
+      continue;
+    }
     if (!key || !value || typeof value !== 'object') {
       if (/roundend/i.test(key)) {
         // even a null/empty-valued RoundEnd must yield a separator
