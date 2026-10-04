@@ -364,6 +364,10 @@ var histStore = { ct: null, t: null };
 function mergedHist(stored, inc) {
   var f = inc && inc.firstHalf || [], s = inc && inc.secondHalf || [], o = inc && inc.overtime || [];
   if (!stored) return { firstHalf: f, secondHalf: s, overtime: o };
+  // Many scoreboard payloads carry NO history at all (player-state-only
+  // increments). They must NOT wipe what we accumulated — only a payload
+  // that actually carries history may reset (new map) or extend it.
+  if (!f.length && !s.length && !o.length) return stored;
   var sF = stored.firstHalf || [], sS = stored.secondHalf || [], sO = stored.overtime || [];
   if (s.length < sS.length) {
     return { firstHalf: f, secondHalf: s, overtime: o }; // new map / restart
