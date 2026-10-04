@@ -20,7 +20,7 @@ export function shellHtml(title: string, body: string, cspSource: string, pageUr
 <html lang="${htmlLang()}"${htmlClass ? ` class="${htmlClass}"` : ''}>
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; font-src https: data:; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline'; frame-src https:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data: vscode-webview-resource: vscode-file:; font-src https: data:; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline'; frame-src https:;">
 <title>${escapeHtml(title)}</title>
 <style>
   body {

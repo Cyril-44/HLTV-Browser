@@ -17,6 +17,9 @@ export function openNewsDetail(url: string): void {
       enableScripts: true,
       retainContextWhenHidden: true,
       enableFindWidget: true,
+      // the media proxy hands back local cache files; without whitelisting
+      // the dir here VSCode refuses to serve them (broken-image placeholders)
+      localResourceRoots: [vscode.Uri.file(media.mediaDir())],
     });
     const page = new NewsDetailPage(panel, url);
     void page.load();
@@ -179,6 +182,12 @@ function fillImage(url, src) {
     if (slot.dataset.src === url && !slot.querySelector('img')) {
       var img = document.createElement('img');
       img.src = src;
+      img.onerror = function () {
+        // surface load failures (CSP / localResourceRoots issues show here)
+        var api = (typeof vsApi === 'function') ? vsApi() : null;
+        if (api) api.postMessage({ type: 'imgError', url: url, src: String(src).slice(0, 140) });
+        if (mediaProgress) { mediaProgress.failed++; updateMediaLabel(); }
+      };
       slot.appendChild(img);
     }
   });
@@ -203,7 +212,7 @@ window.addEventListener('message', function (ev) {
 
 class NewsDetailPage {
   constructor(private panel: vscode.WebviewPanel, private url: string) {
-    panel.webview.onDidReceiveMessage((msg: { type: string; url?: string; urls?: string[] }) => {
+    panel.webview.onDidReceiveMessage((msg: { type: string; url?: string; urls?: string[]; src?: string }) => {
       if (msg.type === 'openLink' && msg.url) {
         void vscode.env.openExternal(vscode.Uri.parse(msg.url.startsWith('http') ? msg.url : 'https://www.hltv.org' + msg.url));
       }
@@ -244,6 +253,11 @@ class NewsDetailPage {
           }
           void this.panel.webview.postMessage({ type: 'mediaDone', ok, fail });
         })();
+      }
+      if (msg.type === 'imgError' && msg.url) {
+        // webview refused to render a proxied image — almost always CSP or a
+        // localResourceRoots miss; log where the user can find it
+        console.log(`[hltv] image failed to render: ${msg.url.slice(0, 80)} → ${msg.src ?? ''}`);
       }
       if (msg.type === 'inlineLink' && msg.url) {
         if (/^\/matches\//.test(msg.url)) {

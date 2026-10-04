@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.4 — 2026-10-04
+
+### Fixed
+- **媒体图片在 webview 中显示为默认占位图**：webview 面板默认只允许加载工作区/扩展目录内的本地文件，而代理图片缓存在 globalStorage —— 现已把媒体缓存目录加入面板 `localResourceRoots` 白名单
+- CSP `img-src` 补充旧版客户端的 `vscode-webview-resource:` / `vscode-file:` scheme 兜底
+- 图片渲染失败现在会上报宿主并计入按钮进度（`✗` 计数），宿主日志输出失败的目标 URI，便于定位
+
 ## 1.3.3 — 2026-10-04
 
 ### Fixed

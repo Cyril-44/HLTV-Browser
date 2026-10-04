@@ -22,6 +22,12 @@ export function setMediaDir(p: string): void {
   }
 }
 
+/** Current media cache dir — webview panels must whitelist it in
+ *  localResourceRoots or VSCode refuses to serve the cached files. */
+export function mediaDir(): string {
+  return cacheDir;
+}
+
 function cachedFileFor(url: string): string {
   const hash = createHash('sha1').update(url).digest('hex');
   const ext = /\.(png|gif|jpe?g|webp|svg)(?:[?#]|$)/i.exec(url)?.[1]?.toLowerCase() ?? 'bin';
