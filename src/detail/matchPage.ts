@@ -43,7 +43,11 @@ class MatchDetailPage {
           const k = Object.keys(it)[0] ?? '?';
           hist.set(k, (hist.get(k) ?? 0) + 1);
         }
-        console.log(`[hltv] scorebot backlog (${items.length}): ${JSON.stringify([...hist.entries()])}`);
+        const firstRoundEnd = items.find((it) => /roundend/i.test(Object.keys(it)[0] ?? ''));
+        console.log(
+          `[hltv] scorebot backlog (${items.length}): ${JSON.stringify([...hist.entries()])}` +
+            ` | RoundEnd sample: ${firstRoundEnd ? JSON.stringify(firstRoundEnd).slice(0, 220) : 'none'}`,
+        );
       }
       void this.panel.webview.postMessage({
         type: 'log',
@@ -91,7 +95,10 @@ class MatchDetailPage {
       this.render();
       if (this.detail.scorebot) {
         // one dedicated scorebot socket per panel: two match pages open at
-        // the same time can never receive each other's log streams
+        // the same time can never receive each other's log streams. A page
+        // refresh re-runs load() — close the previous socket first or both
+        // deliver into the same log box.
+        this.session?.close();
         this.session = new ScorebotMatchSession(this.detail.scorebot.id, this.scoreListener);
       }
     } catch (e) {
@@ -334,7 +341,7 @@ function iconSvg(k) {
   }[k] || '<path d="M7 2.6l1.3 2.8 3 .4-2.2 2.1.5 3-2.6-1.4-2.6 1.4.5-3L2.7 5.8l3-.4z"/>';
   return '<svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
 }
-var ICON_KEYS = [['bomb', ['bomb', 'explosion']], ['defuse', ['defuse', 'defused', 'cut']], ['elimination', ['elimination', 'eliminate', 'kill']], ['time', ['time', 'timeout']]];
+var ICON_KEYS = [['bomb', ['bomb', 'explosion', 'bombed']], ['defuse', ['defuse', 'defused', 'cut']], ['elimination', ['elimination', 'eliminate', 'kill', 'terrorists_win', 'cts_win']], ['time', ['time', 'timeout']]];
 function iconFor(k) {
   var s = String(k || '').toLowerCase();
   for (var i = 0; i < ICON_KEYS.length; i++) {
@@ -344,17 +351,22 @@ function iconFor(k) {
   }
   return '';
 }
-function roundEntryType(x) {
-  if (x == null) return '';
-  if (typeof x === 'object') x = x.winType || x.type || x.method || x.won || '';
-  return String(x);
+// winner side implied by the entry type (history entries are round-outcome
+// descriptors: Terrorists_Win / CTs_Win / Target_Bombed / Bomb_Defused / lost)
+function roundWinnerSide(x) {
+  var t = String((x && typeof x === 'object' ? (x.type || x.winType || '') : x) || '').toLowerCase();
+  if (!t) return '';
+  if (t.indexOf('terrorists_win') >= 0 || t.indexOf('target_bombed') >= 0 || t.indexOf('bomb_explod') >= 0) return 'T';
+  if (t.indexOf('cts_win') >= 0 || t.indexOf('ct_win') >= 0 || t.indexOf('defuse') >= 0) return 'CT';
+  return '?';
 }
-function roundCell(entry) {
-  var t = roundEntryType(entry).toLowerCase();
-  var iconKey = iconFor(t);
-  if (!t || t === 'loss' || t === 'lost' || t === 'lose' || t === 'false' || t === '0' || t === 'none') {
+function roundCell(entry, rowSide) {
+  var t = String((entry && typeof entry === 'object' ? (entry.type || entry.winType || entry.method || '') : entry) || '').toLowerCase();
+  var won = roundWinnerSide(entry) === rowSide;
+  if (!won) {
     return '<td class="rh-lost"><span></span></td>';
   }
+  var iconKey = iconFor(t);
   return '<td class="rh-win' + (iconKey ? '' : ' rh-plain') + '">' + (iconKey ? iconSvg(iconKey) : '·') + '</td>';
 }
 var sbDebugSent = false;
@@ -367,7 +379,7 @@ function renderRoundHistory(s) {
   if (!ct.length && !t.length) { el.textContent = ''; return; }
   var n = Math.max(ct.length, t.length);
   var r1 = '', r2 = '';
-  for (var i = 0; i < n; i++) { r1 += roundCell(ct[i]); r2 += roundCell(t[i]); }
+  for (var i = 0; i < n; i++) { r1 += roundCell(ct[i], 'CT'); r2 += roundCell(t[i], 'T'); }
   el.innerHTML = '<div class="muted" style="font-size:0.85em">' + esc(STR.roundLabel) + '</div>' +
     '<table class="rhist"><tr><th class="rh-team">' + esc(s.ctTeamName || 'CT') + '</th>' + r1 + '</tr>' +
     '<tr><th class="rh-team">' + esc(s.terroristTeamName || 'T') + '</th>' + r2 + '</tr></table>';
@@ -406,16 +418,13 @@ function renderScoreboard(s) {
         if (api) api.postMessage({ type: 'sbDebug', sample: JSON.stringify(p).slice(0, 600) });
       }
       const adr = p.damagePrRound != null ? (typeof p.damagePrRound === 'number' ? p.damagePrRound.toFixed(1) : p.damagePrRound) : '-';
-      const weapon = p.weapon || p.weaponName || p.activeWeapon || '-';
-      // armor/helmet/defuse kit as glyph suffixes; exact field names vary by
-      // scorebot build — sbDebug dump above lets us pin them from a live match
-      const armor = p.armor ?? p.armorValue ?? p.armorPoints;
-      const helm = p.helmet ?? p.hasHelmet;
-      const kit = p.defuseKit ?? p.hasDefuseKit ?? p.defusekit;
+      // field names pinned from a live scoreboard dump:
+      // primaryWeapon / kevlar / helmet / hasDefusekit (booleans), hp, equipmentValue
+      const weapon = (p.primaryWeapon ?? p.weapon ?? p.weaponName ?? p.activeWeapon) || '-';
       let gear = String(weapon);
-      if (typeof armor === 'number' && armor > 0) gear += ' \u2691' + armor;
-      if (helm) gear += ' +H';
-      if (kit) gear += ' +K';
+      if (p.kevlar) gear += ' ' + STR.gearKev;
+      if (p.helmet) gear += ' ' + STR.gearHelm;
+      if (p.hasDefusekit) gear += ' ' + STR.gearKit;
       html += '<tr class="p-row ' + (p.alive ? 'p-alive' : 'p-dead') + '"><td>' + esc(p.name || p.nick || '') + '</td><td class="num">' + (p.money ?? '-') + '</td><td class="nw">' + esc(gear) + '</td><td class="num">' + (p.score ?? '-') + '</td><td class="num">' + (p.assists ?? '-') + '</td><td class="num">' + (p.deaths ?? '-') + '</td><td class="num">' + adr + '</td><td class="num">' + (p.alive ? STR.alive : STR.dead) + '</td></tr>';
     }
   }
@@ -491,6 +500,11 @@ export function formatLogItems(items: LogItem[]): LogLine[] {
   for (const item of items) {
     const [key, value] = Object.entries(item)[0] ?? [];
     if (!key || !value || typeof value !== 'object') {
+      if (/roundend/i.test(key)) {
+        // even a null/empty-valued RoundEnd must yield a separator
+        push(roundEndLine({}, item));
+        continue;
+      }
       if (key) {
         push({ text: String(key), kind: 'normal' });
       }
@@ -543,15 +557,7 @@ export function formatLogItems(items: LogItem[]): LogLine[] {
       continue;
     }
     if (/roundend/i.test(key)) {
-      push({
-        text: t('log.roundEnd', {
-          ct: str(v.counterTerroristScore),
-          t: str(v.terroristScore),
-          w: v.winner === 'CT' ? 'CT' : 'T',
-          type: String(v.winType ?? '').replace(/_/g, ' '),
-        }),
-        kind: 'notime',
-      });
+      push(roundEndLine(v, item));
       pending = null;
       pendingAssist = null;
       continue;
@@ -564,6 +570,36 @@ export function formatLogItems(items: LogItem[]): LogLine[] {
     }
   }
   return out;
+}
+
+/**
+ * Round-end separator line. Field names on RoundEnd vary across scorebot
+ * builds (counterTerroristScore/ctScore/…, winner CT/T/CounterTerrorists/…);
+ * extract defensively and degrade to a scoreless separator rather than
+ * dropping the line entirely — the backlog showed RoundEnd events present
+ * while no separators rendered, so nothing here may return empty.
+ */
+function roundEndLine(v: Record<string, unknown>, item?: LogItem): LogLine {
+  const ct = v.counterTerroristScore ?? v.ctScore ?? v.counterTerroristsScore ?? v.ct ?? v.counterTerrorist;
+  const tSide = v.terroristScore ?? v.tScore ?? v.terroristsScore ?? v.t;
+  const winnerRaw = String(v.winner ?? v.winTeam ?? v.winnerSide ?? '').toLowerCase();
+  const winnerIsCt = /ct|counter/.test(winnerRaw);
+  const type = String(v.winType ?? v.type ?? v.reason ?? '').replace(/_/g, ' ');
+  const ctTxt = ct != null ? String(ct) : '';
+  const tTxt = tSide != null ? String(tSide) : '';
+  if (ctTxt && tTxt && winnerRaw) {
+    return {
+      text: t('log.roundEnd', { ct: ctTxt, t: tTxt, w: winnerIsCt ? 'CT' : 'T', type }),
+      kind: 'notime',
+    };
+  }
+  if (winnerRaw) {
+    return { text: t('log.roundEndShort', { w: winnerIsCt ? 'CT' : 'T' }), kind: 'notime' };
+  }
+  // nothing recognizable: still emit a separator, plus the raw shape when we
+  // have it so the diagnostic log can pin the exact field names
+  const raw = item ? ` ${JSON.stringify(item).slice(0, 80)}` : '';
+  return { text: `${t('log.roundEndShort', { w: '?' })}${raw}`, kind: 'notime' };
 }
 
 /** Compact tags for special kills: headshot / wallbang / smokebang / noscope. */
@@ -602,15 +638,8 @@ export function formatLogItem(item: LogItem): string {
       return t('log.quit', { p: nick(v.playerNick) });
     case 'MatchStarted':
       return t('log.matchStart', { map: nick(v.map).replace(/^de_/, '') });
-    case 'RoundEnd': {
-      const winner = v.winner === 'CT' ? 'CT' : 'T';
-      return t('log.roundEnd', {
-        ct: nick(v.counterTerroristScore),
-        t: nick(v.terroristScore),
-        w: winner,
-        type: String(v.winType ?? '').replace(/_/g, ' '),
-      });
-    }
+    case 'RoundEnd':
+      return roundEndLine(v, item).text;
     case 'Restart':
       return t('log.restart');
     case 'Suicide':
