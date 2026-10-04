@@ -63,10 +63,81 @@ HLTV
 
 - 列表：最近新闻，标题即 HLTV 原文标题。
 - **右键菜单**：`查看详细页面` / `在 HLTV 打开`。
-- **新闻详情页**：完整的 HLTV 新闻页面（文字版）：
-  - 标题、正文正常渲染；
-  - 图片与第三方嵌入控件默认不加载，仅显示文字占位说明（如"[图片：xxx]"、"[嵌入：Twitch 直播]"）；右上角"加载媒体"按钮一键全部加载、再点全部关闭；
+- **新闻详情页**：完整的 HLTV 新闻页面（原生渲染，内嵌官网样式表）：
+  - 标题、正文与所有内嵌控件（比分卡、赛果表、赛程等）按官网样式渲染；
+  - 图片与第三方嵌入控件默认不加载（图片位不显示任何内容，嵌入控件显示 `[EMBED]` 占位）；右上角"加载媒体"按钮一键全部加载、再点全部关闭；媒体开启前所有板块无背景色（含表格斑马纹），开启后恢复官网配色；
   - 评论区正常显示。
+
+## 图例与缩写对照
+
+实时比赛页（计分板 / Game Log / 对局历史）使用以下缩写。
+
+### Game Log 击杀行
+
+格式：`[回合时间] 击杀者 [+ 助攻] [武器] (标记) 被击杀者`，如 `[0:39] Niko + m0NESY [ak47] (HS) apEX`；`*` 前缀表示炸弹已安放时刻的行。
+
+**击杀标记**
+
+| 标记 | 全称 | 含义 |
+| --- | --- | --- |
+| HS | Headshot | 爆头击杀 |
+| WB | Wallbang | 穿墙击杀 |
+| SB | Smoke Bang | 穿烟击杀 |
+| NS | No Scope | 盲狙（未开镜）击杀 |
+
+**武器内部名 → 全称**（Game Log 中显示的是游戏内部名）
+
+| 内部名 | 全称 |
+| --- | --- |
+| ak47 | AK-47 |
+| m4a1 | M4A4 |
+| m4a1_silencer | M4A1-S（消音） |
+| usp_silencer | USP-S（消音手枪） |
+| glock | Glock-18 |
+| hkp2000 | P2000 |
+| p250 | P250 |
+| deagle | Desert Eagle |
+| elite | Dual Berettas（双持贝瑞塔） |
+| fiveseven | Five-SeveN |
+| tec9 | Tec-9 |
+| cz75a | CZ75-Auto |
+| awp | AWP |
+| ssg08 | SSG 08（鸟狙） |
+| sg553 / aug | SG 553 / AUG |
+| galilar / famas | Galil AR / FAMAS |
+| xm1014 | XM1014 |
+| mag7 | MAG-7 |
+| nova / sawedoff | Nova / 截短霰弹枪 |
+| m249 / negev | M249 / 内格夫 |
+| mac10 / mp9 | MAC-10 / MP9 |
+| mp7 / mp5sd | MP7 / MP5-SD |
+| ump45 | UMP-45 |
+| p90 | P90 |
+| hegrenade | 高爆手雷（HE Grenade） |
+| inferno | 燃烧弹火焰（Incendiary / Molotov） |
+| flashbang | 闪光弹 |
+| smokegrenade | 烟雾弹 |
+| decoy | 诱饵弹 |
+| knife / knife_t / knife_butterfly 等 | 匕首 / T 默认刀 / 蝴蝶刀等（各款近战武器） |
+| world | 世界伤害（摔落 / 环境致死，多见于 `suicided (world)`） |
+| elite_masters 等 | 其他特殊内部名按原样显示 |
+
+### 实时计分板装备标记（武器列后缀）
+
+| 标记 | 全称 |
+| --- | --- |
+| [甲] / [kev] | Kevlar 防弹衣 |
+| [盔] / [helm] | Helmet 头盔 |
+| [钳] / [kit] | Defuse Kit 拆弹钳（仅 CT） |
+
+### 对局历史（Rounds）字母
+
+| 字母 | 全称 | 含义 |
+| --- | --- | --- |
+| B | Bomb | 引爆炸弹获胜 |
+| K | Killed | 歼灭对方全部获胜 |
+| S | Saved | 拆除炸弹获胜（Saved / Defused） |
+| T | Time | 时间耗尽获胜 |
 
 ## 架构
 

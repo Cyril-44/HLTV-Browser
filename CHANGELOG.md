@@ -8,6 +8,18 @@
   - 日志盒上限 300 → 2000 行：整场比赛历史全部显示（实测 950 行全量呈现，顶部为最新回合，底部为比赛开始）
 - **移除热身击杀折叠**（按用户要求）：热身阶段事件原样全部显示
 
+
+### 图例与缩写对照（Game Log / 计分板 / 对局历史）
+
+**击杀标记**：HS = Headshot（爆头）、WB = Wallbang（穿墙）、SB = Smoke Bang（穿烟）、NS = No Scope（盲狙）；`*` 前缀 = 炸弹已安放时刻的行。
+
+**武器内部名 → 全称**：ak47 = AK-47、m4a1 = M4A4、m4a1_silencer = M4A1-S、usp_silencer = USP-S、glock = Glock-18、hkp2000 = P2000、p250 = P250、deagle = Desert Eagle、elite = Dual Berettas、awp = AWP、ssg08 = SSG 08、sg553 = SG 553、aug = AUG、galilar = Galil AR、famas = FAMAS、xm1014 = XM1014、mag7 = MAG-7、m249 = M249、negev = 内格夫、mac10 = MAC-10、mp9 = MP9、mp7 = MP7、mp5sd = MP5-SD、ump45 = UMP-45、p90 = P90、hegrenade = 高爆手雷、inferno = 燃烧弹火焰、flashbang = 闪光弹、smokegrenade = 烟雾弹、knife_butterfly = 蝴蝶刀、world = 世界伤害（摔落/环境致死）。完整表格见 README「图例与缩写对照」。
+
+**装备标记**：[甲]/[kev] = Kevlar 防弹衣、[盔]/[helm] = Helmet 头盔、[钳]/[kit] = Defuse Kit 拆弹钳。
+
+**对局历史字母**：B = Bomb（引爆获胜）、K = Killed（歼灭获胜）、S = Saved（拆弹获胜）、T = Time（超时获胜）。
+
+
 ### Diagnostics
 - 新增 `live-log-check` 离线套件：用真实抓包的 404KB 全量回放走完整渲染管线断言（方向、分隔线数量、逐图比分递增、无折叠）
 
