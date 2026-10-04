@@ -35,20 +35,21 @@ export async function getMediaImage(url: string): Promise<string | null> {
   }
   const file = cachedFileFor(url);
   let result: string | null = null;
-  try {
-    if (existsSync(file)) {
-      result = file; // disk cache survives restarts too
-      memory.set(url, result);
-      return result;
-    }
-  } catch {
-    const b64 = await engine.fetchImageBase64(url).catch(() => null);
+  if (existsSync(file)) {
+    result = file; // disk cache survives restarts too
+  } else {
+    const b64 = await engine.fetchImageBase64(url).catch((e) => {
+      if (process.env.HLTV_DEBUG) {
+        console.log(`[media] fetch threw ${url.slice(0, 70)}: ${String(e).split('\n')[0]}`);
+      }
+      return null;
+    });
     if (b64) {
       try {
         writeFileSync(file, Buffer.from(b64, 'base64'));
         result = file;
       } catch {
-        result = null;
+        result = null; // cache dir not writable — image just won't persist
       }
     }
   }

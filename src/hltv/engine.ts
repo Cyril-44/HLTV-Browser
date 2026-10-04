@@ -37,6 +37,8 @@ const UA_FALLBACK =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36';
 
 class HltvEngine {
+  /** Verbose diagnostics to the extension host console (dev aid). */
+  public static debug = false;
   private chain: Promise<unknown> = Promise.resolve();
   private launchErrorShown = false;
   private storagePath: string | null = null;
@@ -159,36 +161,53 @@ class HltvEngine {
   public async fetchImageBase64(url: string, timeoutMs = 15000): Promise<string | null> {
     const page = await this.ensureFetchPage();
     return page.evaluate(
-      async ({ url, timeoutMs }) => {
+      async ({ url, timeoutMs, debug }) => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const why: string[] = [];
         const go = async (credentials: 'omit' | 'include'): Promise<string | null> => {
-          const r = await fetch(url, { credentials, signal: controller.signal });
-          if (!r.ok) {
+          try {
+            const r = await fetch(url, { credentials, signal: controller.signal });
+            if (!r.ok) {
+              why.push(`${credentials}:HTTP${r.status}`);
+              return null;
+            }
+            const ct = r.headers.get('content-type') ?? '';
+            if (!/^(image\/|application\/octet-stream)/.test(ct)) {
+              why.push(`${credentials}:ct=${ct.slice(0, 40)}`);
+              return null; // CF challenge html etc.
+            }
+            const bytes = new Uint8Array(await r.arrayBuffer());
+            let binary = '';
+            for (let i = 0; i < bytes.length; i += 0x8000) {
+              binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+            }
+            return btoa(binary);
+          } catch (e) {
+            why.push(`${credentials}:${String(e).split('\n')[0].slice(0, 60)}`);
             return null;
           }
-          const ct = r.headers.get('content-type') ?? '';
-          if (!/^(image\/|application\/octet-stream)/.test(ct)) {
-            return null; // CF challenge html etc.
-          }
-          const bytes = new Uint8Array(await r.arrayBuffer());
-          let binary = '';
-          for (let i = 0; i < bytes.length; i += 0x8000) {
-            binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-          }
-          return btoa(binary);
         };
         try {
           // img-cdn.hltv.org is a separate origin: credentialed CORS needs an
           // explicit ACAO-credentials header, so try omit first; same-origin
           // www.hltv.org assets need the cf_clearance cookie (include).
-          return (await go('omit').catch(() => null)) ?? (await go('include').catch(() => null));
+          const out = (await go('omit')) ?? (await go('include'));
+          if (!out && debug) {
+            (globalThis as unknown as { __hltvImgErr?: string[] }).__hltvImgErr = why;
+          }
+          return out;
         } finally {
           clearTimeout(timer);
         }
       },
-      { url, timeoutMs },
-    );
+      { url, timeoutMs, debug: HltvEngine.debug },
+    ).catch(async (e: unknown) => {
+      if (HltvEngine.debug) {
+        console.log(`[engine] fetchImage evaluate failed for ${url.slice(0, 70)}: ${String(e).split('\n')[0]}`);
+      }
+      return null;
+    });
   }
 
   public async dispose(): Promise<void> {
@@ -371,13 +390,22 @@ class HltvEngine {
         // hltv.org document is a valid parking spot.
         const notChallenged = html && !html.includes('Just a moment') && !html.includes('security verification');
         if (notChallenged && page.url().includes('hltv.org')) {
+          if (HltvEngine.debug) {
+            console.log(`[engine] parked fetch page ok (round ${round}, cookies=${this.clearanceCookies.length}, url=${page.url().slice(0, 50)})`);
+          }
           this.fetchPage = page;
           return page;
+        }
+        if (HltvEngine.debug) {
+          console.log(`[engine] park round ${round}/${i} not ready: url=${page.url().slice(0, 50)} head=${html.slice(0, 60).replace(/\s+/g, ' ')}`);
         }
         await page.waitForTimeout(2000).catch(() => undefined);
       }
     }
     await context.close().catch(() => undefined);
+    if (HltvEngine.debug) {
+      console.log('[engine] park FAILED after 3 rounds');
+    }
     throw new Error('scorebot origin page stuck on Cloudflare challenge');
   }
 

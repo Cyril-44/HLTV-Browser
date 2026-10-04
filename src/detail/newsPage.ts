@@ -151,6 +151,8 @@ document.getElementById('mediaToggle').addEventListener('click', function (e) {
     // host proxies them through the parked engine page and answers with
     // mediaReady messages carrying local webview uris.
     if (api) {
+      mediaProgress = { total: new Set(imageUrls).size, loaded: 0, failed: 0 };
+      updateMediaLabel();
       api.postMessage({ type: 'loadMedia', urls: imageUrls });
     } else {
       imageUrls.forEach(function (u) {
@@ -158,12 +160,20 @@ document.getElementById('mediaToggle').addEventListener('click', function (e) {
       });
     }
   } else {
+    mediaProgress = null;
     document.querySelectorAll('.media-slot').forEach(function (slot) {
       slot.classList.remove('filled');
       slot.querySelectorAll('img, iframe').forEach(function (el) { el.remove(); });
     });
   }
 });
+var mediaProgress = null;
+function updateMediaLabel() {
+  var btn = document.getElementById('mediaToggle');
+  if (!btn || !mediaProgress) return;
+  btn.textContent = STR.hideMedia + ' ' + mediaProgress.loaded + '/' + mediaProgress.total +
+    (mediaProgress.failed ? ' · ' + mediaProgress.failed + '\\u2717' : '');
+}
 function fillImage(url, src) {
   document.querySelectorAll('.media-slot[data-kind="image"]').forEach(function (slot) {
     if (slot.dataset.src === url && !slot.querySelector('img')) {
@@ -177,6 +187,16 @@ window.addEventListener('message', function (ev) {
   var m = ev.data || {};
   if (m.type === 'mediaReady' && m.url && m.uri && document.body.classList.contains('media-on')) {
     fillImage(m.url, m.uri);
+    if (mediaProgress) { mediaProgress.loaded++; updateMediaLabel(); }
+  }
+  if (m.type === 'mediaDone' && mediaProgress) {
+    mediaProgress.failed = m.fail || 0;
+    updateMediaLabel();
+    setTimeout(function () {
+      mediaProgress = null;
+      var btn = document.getElementById('mediaToggle');
+      if (btn && btn.dataset.on === '1') btn.textContent = STR.hideMedia;
+    }, 4000);
   }
 });`;
 }
@@ -205,17 +225,24 @@ class NewsDetailPage {
         // parked engine page, sequentially (no concurrent fetches), replying
         // per image so slots fill progressively.
         void (async () => {
-          for (const u of msg.urls!) {
+          const urls = [...new Set(msg.urls!)];
+          let ok = 0;
+          let fail = 0;
+          for (const u of urls) {
             const file = await media.getMediaImage(u).catch(() => null);
             if (file) {
+              ok++;
               void this.panel.webview.postMessage({
                 type: 'mediaReady',
                 url: u,
                 uri: this.panel.webview.asWebviewUri(vscode.Uri.file(file)).toString(),
               });
+            } else {
+              fail++;
             }
-            await new Promise((r) => setTimeout(r, 200));
+            await new Promise((r) => setTimeout(r, 150));
           }
+          void this.panel.webview.postMessage({ type: 'mediaDone', ok, fail });
         })();
       }
       if (msg.type === 'inlineLink' && msg.url) {
