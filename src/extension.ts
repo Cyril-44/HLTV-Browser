@@ -1,5 +1,7 @@
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { engine } from './hltv/engine';
+import * as media from './hltv/media';
 import { MatchesView } from './views/matchesView';
 import { ResultsView } from './views/resultsView';
 import { EventsView } from './views/eventsView';
@@ -16,6 +18,7 @@ const HLTV_ORIGIN = 'https://www.hltv.org';
 
 export function activate(context: vscode.ExtensionContext): void {
   engine.setStoragePath(context.globalStorageUri.fsPath);
+  media.setMediaDir(path.join(context.globalStorageUri.fsPath, 'media-cache'));
 
   const matchesView = new MatchesView();
   const resultsView = new ResultsView();

@@ -151,6 +151,46 @@ class HltvEngine {
     );
   }
 
+  /**
+   * Fetch image bytes through the parked fetch page (carries the CF cookies
+   * and the real browser network stack — webviews/curl get challenged).
+   * Returns base64, or null when the response is not an image (CF html etc.).
+   */
+  public async fetchImageBase64(url: string, timeoutMs = 15000): Promise<string | null> {
+    const page = await this.ensureFetchPage();
+    return page.evaluate(
+      async ({ url, timeoutMs }) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const go = async (credentials: 'omit' | 'include'): Promise<string | null> => {
+          const r = await fetch(url, { credentials, signal: controller.signal });
+          if (!r.ok) {
+            return null;
+          }
+          const ct = r.headers.get('content-type') ?? '';
+          if (!/^(image\/|application\/octet-stream)/.test(ct)) {
+            return null; // CF challenge html etc.
+          }
+          const bytes = new Uint8Array(await r.arrayBuffer());
+          let binary = '';
+          for (let i = 0; i < bytes.length; i += 0x8000) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+          }
+          return btoa(binary);
+        };
+        try {
+          // img-cdn.hltv.org is a separate origin: credentialed CORS needs an
+          // explicit ACAO-credentials header, so try omit first; same-origin
+          // www.hltv.org assets need the cf_clearance cookie (include).
+          return (await go('omit').catch(() => null)) ?? (await go('include').catch(() => null));
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+      { url, timeoutMs },
+    );
+  }
+
   public async dispose(): Promise<void> {
     await this.fetchBrowser?.close().catch(() => undefined);
     this.fetchBrowser = null;

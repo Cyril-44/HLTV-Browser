@@ -90,12 +90,20 @@ if (existsSync('/tmp/pwtest/out/newslist.html')) {
 }
 
 const article = parseNewsArticle(read('news-article-1.html'), '/news/45536/grim-it-was-a-great-win-for-us-and-much-needed-for-everyones-confidence');
-summary('newsArticle', {
+summary('newsArticle (passthrough)', {
   title: article.title,
   author: article.author,
   date: article.date,
   intro: article.intro?.slice(0, 100),
-  blocks: article.blocks.map((b) => `${b.kind}${'segments' in b && b.segments.some((x) => x.bold) ? '(B)' : ''}: ${'segments' in b ? b.segments.map((x) => x.text).join('').slice(0, 60) : b.kind === 'match' ? `${b.team1} ${b.score1}-${b.score2} ${b.team2} [${b.maps.length} maps, ${b.stats.length} tables]` : b.label}`),
+  bodyHtmlLen: article.bodyHtml.length,
+  bodyHasHeadline: article.bodyHtml.includes('news-block'),
+  // sanitizer contract: no placeholder text, original classes kept on slots,
+  // relative src absolutized, embeds tagged
+  noImgPlaceholder: !article.bodyHtml.includes('[IMG]'),
+  flagClassKept: article.bodyHtml.includes('media-slot newsitem-match-result-team-flag-left'),
+  relativeSrcAbsolutized: article.bodyHtml.includes('data-src="https://www.hltv.org/img/static/flags/30x20/EU.gif"'),
+  absoluteSrcKept: article.bodyHtml.includes('img-cdn.hltv.org/teamlogo/abc.png'),
+  embedSlot: article.bodyHtml.includes('data-kind="embed"'),
+  noScriptStyle: !article.bodyHtml.includes('<script') && !article.bodyHtml.includes('<style'),
   comments: article.comments.length,
-  firstComments: article.comments.slice(0, 3),
 });

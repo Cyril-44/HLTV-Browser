@@ -208,6 +208,9 @@ NEWS_ARTICLE = '''<html><body><article class="newsitem standard-box">
 <p class="news-block">Answer paragraph with<b> bold entity</b>.</p>
 <blockquote><p class="news-block">Quoted pull line.</p></blockquote>
 <div class="featured-quote"><div class="featured-quote-quote">That featured quote speech</div><div class="featured-quote-author"><a href="/player/1/x">William "mezii" Merriman</a></div></div>
+<img class="newsitem-match-result-team-flag-left" src="/img/static/flags/30x20/EU.gif"/>
+<img src="https://img-cdn.hltv.org/teamlogo/abc.png?w=50"/>
+<iframe src="https://clips.twitch.tv/embed?clip=x"></iframe>
 <hr/>
 <div class="twocol"><div class="twocol-grid"><div class="twocol-col"><a href="/team/1/a"> BC.Game</a><br><a href="/team/2/b"> Ninjas in Pyjamas</a><br></div></div></div>
 </div></div>
