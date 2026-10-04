@@ -2,7 +2,7 @@
  * Dev-only: run all parsers against saved HLTV page dumps.
  * Usage: node scripts/run-parse-check.js   (after building with esbuild)
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { parseMatchesPage } from '../src/hltv/parse/matches';
 import { parseResultsPage } from '../src/hltv/parse/results';
 import { parseEventsPage } from '../src/hltv/parse/events';
@@ -68,15 +68,26 @@ summary('eventDetail (starladder)', {
   brackets: starladder.brackets.map((b) => `${b.title}: ${b.rounds.map((r) => `${r.name}(${r.matchups.length})`).join(' | ')}`),
 });
 
-const porto = parseEventPage(read('event-porto.html'), '/events/8249/blast-open-porto-2026');
-summary('eventDetail (porto)', {
-  brackets: porto.brackets.map((b) => `${b.title}: ${b.rounds.map((r) => `${r.name}(${r.matchups.length})`).join(' | ')}`),
-  sampleMatchup: porto.brackets[0]?.rounds?.[0]?.matchups?.[0],
-  teams: porto.teams.length,
-});
+// event-porto.html is a REAL captured page (not synthetic); it may be absent
+// when /tmp got wiped — the bracket path is also covered by starladder above.
+if (existsSync('/tmp/pwtest/out/event-porto.html')) {
+  const porto = parseEventPage(read('event-porto.html'), '/events/8249/blast-open-porto-2026');
+  summary('eventDetail (porto)', {
+    brackets: porto.brackets.map((b) => `${b.title}: ${b.rounds.map((r) => `${r.name}(${r.matchups.length})`).join(' | ')}`),
+    sampleMatchup: porto.brackets[0]?.rounds?.[0]?.matchups?.[0],
+    teams: porto.teams.length,
+  });
+} else {
+  console.log('== eventDetail (porto): capture missing, skipped ==');
+}
 
-const news = parseNewsList(read('newslist.html'));
-summary(`news (${news.length})`, news.slice(0, 3));
+// newslist.html is a REAL captured page; skip when the /tmp capture is gone.
+if (existsSync('/tmp/pwtest/out/newslist.html')) {
+  const news = parseNewsList(read('newslist.html'));
+  summary(`news (${news.length})`, news.slice(0, 3));
+} else {
+  console.log('== news list: capture missing, skipped ==');
+}
 
 const article = parseNewsArticle(read('news-article-1.html'), '/news/45536/grim-it-was-a-great-win-for-us-and-much-needed-for-everyones-confidence');
 summary('newsArticle', {

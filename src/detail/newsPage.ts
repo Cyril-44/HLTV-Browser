@@ -23,6 +23,58 @@ export function openNewsDetail(url: string): void {
   });
 }
 
+/**
+ * Build the full native-rendering HTML for a news article. Pure on purpose:
+ * the extension webview and the offline preview harness share this exact
+ * code path. themeClass is HLTV's own day/night theme ("day-theme" /
+ * "night-theme") picked from the active VSCode color theme.
+ */
+export function buildNativeNewsHtml(
+  title: string,
+  metaLine: string,
+  d: { bodyHtml: string; teams: { name: string; rank: string; players: string[] }[] },
+  hltvCss: string,
+  themeClass: 'day-theme' | 'night-theme',
+  vscodeVars = '',
+): string {
+  const parts: string[] = [];
+  parts.push(`<button id="mediaToggle" class="media-toggle" data-on="0">${t('news.loadMedia')}</button>`);
+  parts.push(`<h1>${escapeHtml(title)}</h1>`);
+  parts.push(`<p class="meta">${metaLine}</p>`);
+  parts.push('<style>' + hltvCss + '</style>');
+  // Strip only PAGE-level chrome: force our editor background on html/body and
+  // keep content widgets' own card styles. HLTV theme variables live on
+  // `:root.night-theme` / `:root.day-theme`, so callers must also put the theme
+  // class on the <html> element (shellHtml htmlClass) for text colors and
+  // .day-only/.night-only visibility to match the real site.
+  parts.push(
+    `<style>${vscodeVars}
+html,body{background:var(--vscode-editor-background)!important;background-image:none!important}
+body{overflow-x:hidden}
+.hltv-native .text-ellipsis,.hltv-native .newstext-con{max-width:none}
+.hltv-native a{cursor:pointer}
+body:not(.media-on) .hltv-native img{display:none}
+.hltv-native .videoCon{margin:1em 0}
+.hltv-native .videoWrapper{height:auto!important;padding-bottom:0!important;min-height:0!important;background:none!important}
+.hltv-native .media-slot.filled iframe{display:block;width:100%;aspect-ratio:16/9;height:auto;border:0}
+.hltv-native .media-slot.filled img{display:block;max-width:100%;height:auto}</style>`,
+  );
+  // `newsdsl` scope is required: HLTV scopes every embedded news widget
+  // (.newsitem-match-result etc.) under `.newsdsl .…`; without this ancestor
+  // the widgets fall back to stacked block layout.
+  parts.push(`<div class="hltv-native ${themeClass} newsdsl">${d.bodyHtml}</div>`);
+  if (d.teams.length) {
+    const teamRows = d.teams
+      .map(
+        (team) =>
+          `<p class="matchline"><strong>${escapeHtml(team.name)}</strong>${team.rank ? ` <span class="muted">${escapeHtml(team.rank)}</span>` : ''}${team.players.length ? `: ${team.players.map(escapeHtml).join('、')}` : ''}</p>`,
+      )
+      .join('');
+    parts.push(`<h2>${t('news.teams')} <span class="sub">(${d.teams.length})</span></h2>${teamRows}`);
+  }
+  return parts.join('');
+}
+
 function renderSegments(segments: NewsSegment[]): string {
   return segments
     .map((seg) => {
@@ -105,22 +157,16 @@ class NewsDetailPage {
   /** Native rendering: sanitized original markup + HLTV's own stylesheet,
    *  with page chrome (backgrounds/boxes) stripped via overrides. */
   private renderNative(d: NewsDetail, hltvCss: string): void {
-    const parts: string[] = [];
-    parts.push(`<button id="mediaToggle" class="media-toggle" data-on="0">${t('news.loadMedia')}</button>`);
-    parts.push(`<h1>${escapeHtml(d.title)}</h1>`);
-    parts.push(`<p class="meta">${[d.author, d.date ? formatDateTime(d.date) : ''].filter(Boolean).map(escapeHtml).join(' · ')}</p>`);
-    parts.push('<style>' + hltvCss + '</style>');
-    parts.push('<style>body{background:var(--vscode-editor-background)!important;background-image:none!important}.hltv-native,.hltv-native *{background-color:transparent}.hltv-native .newsitem{margin:0;box-shadow:none}.hltv-native img{display:none}.hltv-native a{cursor:pointer}</style>');
-    parts.push(`<div class="hltv-native">${d.bodyHtml}</div>`);
+    const themeClass: 'day-theme' | 'night-theme' =
+      vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light ||
+      vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrastLight
+        ? 'day-theme'
+        : 'night-theme';
+    const metaLine = [d.author, d.date ? formatDateTime(d.date) : ''].filter(Boolean).map(escapeHtml).join(' · ');
+    const body = buildNativeNewsHtml(d.title, metaLine, d, hltvCss, themeClass);
 
-    if (d.teams.length) {
-      parts.push(`<h2>${t('news.teams')} <span class="sub">(${d.teams.length})</span></h2>`);
-      for (const team of d.teams) {
-        parts.push(
-          `<p class="matchline"><strong>${escapeHtml(team.name)}</strong>${team.rank ? ` <span class="muted">${escapeHtml(team.rank)}</span>` : ''}${team.players.length ? `: ${team.players.map(escapeHtml).join('、')}` : ''}</p>`,
-        );
-      }
-    }
+    const parts: string[] = [body];
+
     if (d.comments.length) {
       parts.push(`<hr/><h2>${t('news.comments')} <span class="sub">(${d.comments.length})</span></h2>`);
       for (const c of d.comments) {
@@ -147,6 +193,7 @@ document.getElementById('mediaToggle').addEventListener('click', (e) => {
   btn.dataset.on = turnOn ? '1' : '0';
   btn.textContent = turnOn ? STR.hideMedia : STR.loadMedia;
   btn.classList.toggle('active', turnOn);
+  document.body.classList.toggle('media-on', turnOn);
   document.querySelectorAll('.media-slot').forEach(slot => {
     if (turnOn) {
       slot.classList.add('filled');
@@ -157,7 +204,7 @@ document.getElementById('mediaToggle').addEventListener('click', (e) => {
           slot.appendChild(img);
         } else {
           const frame = document.createElement('iframe');
-          frame.src = slot.dataset.src; frame.width = '100%'; frame.height = '152';
+          frame.src = slot.dataset.src; frame.width = '100%';
           frame.allow = 'autoplay; encrypted-media';
           slot.appendChild(frame);
         }
@@ -168,7 +215,13 @@ document.getElementById('mediaToggle').addEventListener('click', (e) => {
     }
   });
 });`;
-    this.panel.webview.html = shellHtml(`${d.title} | HLTV`, parts.join('') + `<script>${script}</script>`, this.panel.webview.cspSource, this.url);
+    this.panel.webview.html = shellHtml(
+      `${d.title} | HLTV`,
+      parts.join('') + `<script>${script}</script>`,
+      this.panel.webview.cspSource,
+      this.url,
+      themeClass, // HLTV theme vars live on :root.<theme> — must be on <html>
+    );
   }
 
   private render(d: NewsDetail): void {
