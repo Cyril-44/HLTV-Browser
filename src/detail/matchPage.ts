@@ -316,7 +316,7 @@ function prependLog(lines, reset, bombPlanted, roundEnded, roundStarted) {
     div.textContent = text;
     box.insertBefore(div, box.firstChild);
   }
-  while (box.children.length > 300) box.removeChild(box.lastChild);
+  while (box.children.length > 2000) box.removeChild(box.lastChild);
   if (bombPlanted) {
     if (stampAtPlant) plantClockText = stampAtPlant;
     setClock(clock ? Math.min(clock.ms, 40000) : 40000);
@@ -455,17 +455,17 @@ renderStats();`;
 }
 
 /**
- * Normalize a scorebot replay (the initial full-log batch):
- * 1. Direction — replays may arrive newest-first (RoundEnd total scores
- *    descend); the page renders newest-on-top by inserting each array item
- *    at the top, so a newest-first array inverts to oldest-on-top and the
- *    200-line trim then eats the REAL recent rounds while warmup junk stays
- *    visible. Detect via score progression and flip when needed.
- * 2. Warmup — kill-type events before the first RoundStart are practice
- *    spam; replace them with a single "omitted" marker line.
+ * Normalize a scorebot replay (the initial full-log batch). Verified against
+ * the live wire (2026-10): the replay array is NEWEST-FIRST — array head is
+ * the latest event, tail is the very first MatchStarted. The page renders
+ * newest-on-top by inserting each item at the top, so a newest-first array
+ * must be flipped or the oldest events land on top and the box trim eats
+ * the recent rounds. Direction is detected two ways: RoundEnd score totals
+ * descending, or (matches still in warmup, no rounds yet) the tail being the
+ * founding MatchStarted while the head is a play event.
  */
 export function normalizeReplay(items: LogItem[]): LogItem[] {
-  const keyOf = (it: LogItem): string => Object.keys(it)[0] ?? '';
+  const keyOf = (it: LogItem): string => String(Object.keys(it)[0] ?? '');
   const roundEndTotal = (it: LogItem): number | null => {
     const v = Object.values(it)[0] as Record<string, unknown> | undefined;
     if (!v || typeof v !== 'object') {
@@ -479,17 +479,12 @@ export function normalizeReplay(items: LogItem[]): LogItem[] {
     .filter((it) => /roundend/i.test(keyOf(it)))
     .map(roundEndTotal)
     .filter((x): x is number => x != null);
-  let out = ends.length >= 2 && ends[0] > ends[ends.length - 1] ? [...items].reverse() : items;
-  const firstRound = out.findIndex((it) => /roundstart/i.test(keyOf(it)));
-  if (firstRound > 0) {
-    const head = out.slice(0, firstRound);
-    const isKillType = (it: LogItem): boolean => /^(kill|assist|suicide)/i.test(keyOf(it));
-    const omitted = head.filter(isKillType).length;
-    if (omitted) {
-      out = [...head.filter((it) => !isKillType(it)), { Warmup: { n: omitted } } as unknown as LogItem, ...out.slice(firstRound)];
-    }
+  if (ends.length >= 2 && ends[0] > ends[ends.length - 1]) {
+    return [...items].reverse();
   }
-  return out;
+  const headIsPlay = /^(kill|assist|suicide|bombplanted|roundstart|roundend)/i.test(keyOf(items[0] ?? {}));
+  const tailIsFounding = /matchstarted/i.test(keyOf(items[items.length - 1] ?? {}));
+  return headIsPlay && tailIsFounding ? [...items].reverse() : items;
 }
 
 interface PendingKill {
@@ -529,12 +524,6 @@ export function formatLogItems(items: LogItem[]): LogLine[] {
   };
   for (const item of items) {
     const [key, value] = Object.entries(item)[0] ?? [];
-    if (/^warmup/i.test(key)) {
-      push({ text: t('log.warmup', { n: String((value as { n?: number })?.n ?? '') }), kind: 'notime' });
-      pending = null;
-      pendingAssist = null;
-      continue;
-    }
     if (!key || !value || typeof value !== 'object') {
       if (/roundend/i.test(key)) {
         // even a null/empty-valued RoundEnd must yield a separator
