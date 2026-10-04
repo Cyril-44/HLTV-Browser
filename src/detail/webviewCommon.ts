@@ -77,7 +77,8 @@ export function shellHtml(title: string, body: string, cspSource: string, pageUr
   .muted { color: var(--vscode-descriptionForeground); }
   .teamgrid { display: flex; flex-wrap: wrap; gap: 4px 18px; }
   .logbox { font-family: var(--vscode-editor-font-family); font-size: 0.85em; white-space: pre-wrap; border: 1px solid var(--vscode-panel-border); padding: 8px 10px; max-height: 260px; overflow-y: auto; }
-  .logbox div:nth-child(even) { background: var(--vscode-list-hoverBackground); }
+  /* zebra by ROUND block, not by line: same round = same background */
+  .logbox div.r1 { background: var(--vscode-list-hoverBackground); }
   .ptable tbody tr:nth-child(even) td { background: var(--vscode-list-hoverBackground); }
   .p-dead td { color: var(--vscode-descriptionForeground); }
   .p-alive td:first-child { color: var(--vscode-charts-green, var(--vscode-foreground)); }

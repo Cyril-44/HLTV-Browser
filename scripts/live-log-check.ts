@@ -24,6 +24,21 @@ function main(): void {
   console.log('direction flip applied:', reversed, '| after flip first key:', Object.keys(norm[0])[0], '| last key:', Object.keys(norm[norm.length - 1])[0]);
 
   const lines = formatLogItems(norm);
+  // round-block assignment: non-decreasing, bumps at RoundStart, resets on MatchStarted
+  let roundOk = true;
+  let lastRound = 0;
+  let maxRound = 0;
+  const roundBumps: number[] = [];
+  for (const l of lines) {
+    const r = l.round ?? 0;
+    if (r < lastRound && !/比赛开始|Match started/.test(l.text)) roundOk = false;
+    if (r !== lastRound) roundBumps.push(r);
+    lastRound = r;
+    if (r > maxRound) maxRound = r;
+  }
+  console.log('round blocks: max index', maxRound, '| transitions:', roundBumps.length, '| monotone-per-map:', roundOk);
+  const striped = lines.filter((l) => (l.round ?? 0) % 2 === 1).length;
+  console.log('striped (odd-round) lines:', striped, 'of', lines.length);
   const sepCount = lines.filter((l) => (l.text.includes('胜') || l.text.includes('win')) && l.kind === 'notime' && l.text.includes('——')).length;
   console.log('formatted lines:', lines.length, '| round-end separators:', sepCount);
 

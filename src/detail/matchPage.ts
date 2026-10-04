@@ -25,6 +25,8 @@ export function openMatchDetail(url: string): void {
 class MatchDetailPage {
   private detail: MatchDetail | null = null;
   private session: ScorebotMatchSession | null = null;
+  /** last round index seen — live log batches continue its zebra blocks */
+  private roundSeq = 0;
   private scoreListener = {
     onScore: (frame: ScoreFrame): void => {
       const text = this.scoreText(frame);
@@ -50,9 +52,11 @@ class MatchDetailPage {
             ` | RoundEnd sample: ${firstRoundEnd ? JSON.stringify(firstRoundEnd).slice(0, 220) : 'none'}`,
         );
       }
+      const lines = formatLogItems(list, reset ? 0 : this.roundSeq);
+      this.roundSeq = lines.length ? lines[lines.length - 1].round ?? this.roundSeq : this.roundSeq;
       void this.panel.webview.postMessage({
         type: 'log',
-        lines: formatLogItems(list),
+        lines,
         reset,
         bombPlanted,
         roundEnded,
@@ -314,6 +318,8 @@ function prependLog(lines, reset, bombPlanted, roundEnded, roundStarted) {
       text = '*' + text;
     }
     div.textContent = text;
+    // round-block zebra: every line carries the round index from the host
+    div.className = (l.round ?? 0) % 2 ? 'r1' : '';
     box.insertBefore(div, box.firstChild);
   }
   while (box.children.length > 2000) box.removeChild(box.lastChild);
@@ -500,6 +506,9 @@ export interface LogLine {
   text: string;
   /** normal: [clock] prefix · bomb: `*` before the clock · notime: no stamp */
   kind: 'normal' | 'bomb' | 'notime';
+  /** round block index for zebra striping: bumps at each RoundStart, resets
+   *  to 0 on MatchStarted (new map). Warmup lines live in block 0. */
+  round?: number;
 }
 
 /**
@@ -507,12 +516,15 @@ export interface LogLine {
  * entries right after the kill they belong to ("X assist") — merge them into
  * the kill line: `Niko + m0NESY [ak47] apEX`.
  */
-export function formatLogItems(items: LogItem[]): LogLine[] {
+export function formatLogItems(items: LogItem[], startRound = 0): LogLine[] {
   const out: LogLine[] = [];
   // Assists usually ARRIVE BEFORE the kill they belong to in the scorebot
   // stream, but sometimes follow it — support both directions.
   let pending: (PendingKill & { line: LogLine }) | null = null;
   let pendingAssist: string | null = null;
+  // round block counter for zebra striping: live batches continue from the
+  // previous batch's last round (startRound), reset batches start at 0.
+  let round = startRound;
   const str = (x: unknown): string => String(x ?? '');
   const push = (line: LogLine): void => {
     // Warmup loops repeat identical announcements (Match started etc.) —
@@ -520,10 +532,14 @@ export function formatLogItems(items: LogItem[]): LogLine[] {
     if (out.length && out[out.length - 1].text === line.text && line.kind === 'normal') {
       return;
     }
+    line.round = round;
     out.push(line);
   };
   for (const item of items) {
     const [key, value] = Object.entries(item)[0] ?? [];
+    if (/^matchstarted$/i.test(key)) {
+      round = 0; // new map: fresh block sequence
+    }
     if (!key || !value || typeof value !== 'object') {
       if (/roundend/i.test(key)) {
         // even a null/empty-valued RoundEnd must yield a separator
@@ -537,6 +553,7 @@ export function formatLogItems(items: LogItem[]): LogLine[] {
     }
     const v = value as Record<string, unknown>;
     if (/^roundstart$/i.test(key) || /restart/i.test(key)) {
+      round++;
       push({ text: t(/restart/i.test(key) ? 'log.restart' : 'log.roundStart'), kind: 'notime' });
       pending = null;
       pendingAssist = null;
