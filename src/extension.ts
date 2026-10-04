@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { engine } from './hltv/engine';
-import { scorebot } from './hltv/scorebot';
 import { MatchesView } from './views/matchesView';
 import { ResultsView } from './views/resultsView';
 import { EventsView } from './views/eventsView';
@@ -73,6 +72,5 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-  scorebot.shutdown();
   void engine.dispose();
 }

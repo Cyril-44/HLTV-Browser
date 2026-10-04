@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as api from '../hltv/api';
-import { scorebot } from '../hltv/scorebot';
+import { ScorebotMatchSession, scorebot } from '../hltv/scorebot';
 import { MatchDetail, StatsTable, StatRow, ScoreFrame, LogItem } from '../hltv/types';
 import { PanelRegistry, shellHtml, escapeHtml, panelKey } from './webviewCommon';
 import { formatDateTime } from '../util/time';
@@ -24,6 +24,7 @@ export function openMatchDetail(url: string): void {
 
 class MatchDetailPage {
   private detail: MatchDetail | null = null;
+  private session: ScorebotMatchSession | null = null;
   private scoreListener = {
     onScore: (frame: ScoreFrame): void => {
       const text = this.scoreText(frame);
@@ -49,9 +50,8 @@ class MatchDetailPage {
 
   constructor(private panel: vscode.WebviewPanel, private url: string) {
     panel.onDidDispose(() => {
-      if (this.detail?.scorebot) {
-        scorebot.unsubscribe(this.detail.scorebot.id, this.scoreListener);
-      }
+      this.session?.close();
+      this.session = null;
     });
     panel.webview.onDidReceiveMessage((msg: { type: string; url?: string }) => {
       if (msg.type === 'openLink' && msg.url) {
@@ -74,15 +74,9 @@ class MatchDetailPage {
       this.panel.title = `${this.detail.team1.name} vs ${this.detail.team2.name}`;
       this.render();
       if (this.detail.scorebot) {
-        scorebot.subscribeMatch(this.detail.scorebot.id, this.scoreListener);
-        const latest = scorebot.getLatestScore(this.detail.scorebot.id);
-        if (latest) {
-          this.scoreListener.onScore?.(latest);
-        }
-        const backlog = scorebot.getRecentLog();
-        if (backlog.length) {
-          void this.panel.webview.postMessage({ type: 'log', lines: formatLogItems(backlog), reset: true });
-        }
+        // one dedicated scorebot socket per panel: two match pages open at
+        // the same time can never receive each other's log streams
+        this.session = new ScorebotMatchSession(this.detail.scorebot.id, this.scoreListener);
       }
     } catch (e) {
       this.panel.webview.html = shellHtml(t('page.loadFailed'), `<h1>${t('page.loadFailed')}</h1><p class="meta">${escapeHtml(String(e).split('\n')[0])}</p>`, this.panel.webview.cspSource, this.url);
@@ -115,6 +109,7 @@ class MatchDetailPage {
       parts.push(`<div id="liveSection">
         <h2>${t('match.liveSection')} <span class="sub" id="liveMap"></span></h2>
         <p class="matchline"><span class="score-big" id="liveScore">…</span> <span class="muted" id="roundClock"></span></p>
+        <p class="meta" id="roundHistory"></p>
         <p class="meta" id="liveMaps"></p>
         <div id="playerTable"></div>
         <h3>${t('match.gameLog')}</h3>
@@ -183,7 +178,7 @@ class MatchDetailPage {
 
     const statsJson = JSON.stringify(d.stats);
     const script = `
-const STR = Object.assign({ ecoOn: ${JSON.stringify(t('match.ecoOn'))}, ecoOff: ${JSON.stringify(t('match.ecoOff'))} }, ${JSON.stringify(webviewStrings())});
+const STR = Object.assign({ ecoOn: ${JSON.stringify(t('match.ecoOn'))}, ecoOff: ${JSON.stringify(t('match.ecoOff'))}, weaponCol: ${JSON.stringify(t('match.weaponCol'))}, roundLabel: ${JSON.stringify(t('match.roundHistory'))} }, ${JSON.stringify(webviewStrings())});
 const statsData = ${statsJson};
 function statTables(mapId, side) {
   // All three side variants are embedded in the page data — switching is a
@@ -312,6 +307,27 @@ function prependLog(lines, reset, bombPlanted, roundEnded, roundStarted) {
   }
 }
 
+// Round-win symbols (the site shows icons: scissors/head/fire/…)
+var ROUND_SYM = { bomb: '\u70B8', explosion: '\u70B8', defuse: '\u62C6', defused: '\u62C6', elimination: '\u706D', eliminate: '\u706D', time: '\u65F6', timeout: '\u65F6', win: '\u80DC', clutch: '\u7A81' };
+function roundSym(x) {
+  if (x == null) return '\u00B7';
+  if (typeof x === 'object') x = x.winType || x.type || x.method || '';
+  var k = String(x).toLowerCase();
+  if (ROUND_SYM[k]) return ROUND_SYM[k];
+  var hit = Object.keys(ROUND_SYM).find(function (key) { return k.indexOf(key) >= 0; });
+  return hit ? ROUND_SYM[hit] : k.charAt(0).toUpperCase();
+}
+function renderRoundHistory(s) {
+  var el = document.getElementById('roundHistory');
+  if (!el) return;
+  var hist = s.ctMatchHistory || s.terroristMatchHistory;
+  if (!hist) { el.textContent = ''; return; }
+  var pick = function (h) { return (h && ((h.firstHalf || []).concat(h.secondHalf || []))) || []; };
+  var ct = pick(s.ctMatchHistory);
+  var t = pick(s.terroristMatchHistory);
+  if (!ct.length && !t.length) { el.textContent = ''; return; }
+  el.innerHTML = '<span class="muted">' + esc(STR.roundLabel) + '</span> CT: <strong>' + ct.map(roundSym).join('') + '</strong> · T: <strong>' + t.map(roundSym).join('') + '</strong>';
+}
 function renderScoreboard(s) {
   const area = document.getElementById('playerTable');
   if (!area || !s) return;
@@ -321,15 +337,17 @@ function renderScoreboard(s) {
     }
     setClock(s.bombPlanted ? Math.min(s.roundTimeRemainingMS, 40000) : s.roundTimeRemainingMS);
   }
+  renderRoundHistory(s);
   let html = '';
   const sides = [['TERRORIST', s.terroristTeamName || 'T'], ['CT', s.ctTeamName || 'CT']];
   for (const [side, label] of sides) {
     const rows = s[side];
     if (!Array.isArray(rows) || !rows.length) continue;
-    html += '<table class="ptable"><tr><th>' + esc(label) + '</th><th>$</th><th>K</th><th>A</th><th>D</th><th>ADR</th><th>' + STR.stateCol + '</th></tr>';
+    html += '<table class="ptable"><tr><th>' + esc(label) + '</th><th>$</th><th>' + STR.weaponCol + '</th><th>K</th><th>A</th><th>D</th><th>ADR</th><th>' + STR.stateCol + '</th></tr>';
     for (const p of rows) {
       const adr = p.damagePrRound != null ? (typeof p.damagePrRound === 'number' ? p.damagePrRound.toFixed(1) : p.damagePrRound) : '-';
-      html += '<tr class="p-row ' + (p.alive ? 'p-alive' : 'p-dead') + '"><td>' + esc(p.name || p.nick || '') + '</td><td class="num">' + (p.money ?? '-') + '</td><td class="num">' + (p.score ?? '-') + '</td><td class="num">' + (p.assists ?? '-') + '</td><td class="num">' + (p.deaths ?? '-') + '</td><td class="num">' + adr + '</td><td class="num">' + (p.alive ? STR.alive : STR.dead) + '</td></tr>';
+      const weapon = p.weapon || p.weaponName || p.activeWeapon || '-';
+      html += '<tr class="p-row ' + (p.alive ? 'p-alive' : 'p-dead') + '"><td>' + esc(p.name || p.nick || '') + '</td><td class="num">' + (p.money ?? '-') + '</td><td class="num">' + esc(String(weapon)) + '</td><td class="num">' + (p.score ?? '-') + '</td><td class="num">' + (p.assists ?? '-') + '</td><td class="num">' + (p.deaths ?? '-') + '</td><td class="num">' + adr + '</td><td class="num">' + (p.alive ? STR.alive : STR.dead) + '</td></tr>';
     }
     html += '</table>';
   }
@@ -421,7 +439,7 @@ export function formatLogItems(items: LogItem[]): LogLine[] {
       const killer = str(v.killerNick ?? v.killer ?? v.killerName);
       const victim = str(v.victimNick ?? v.victim ?? v.victimName);
       const weapon = str(v.weapon ?? v.weaponName);
-      const hs = v.headshot ? ' (HS)' : '';
+      const hs = killFlags(v);
       const inlineAssist = str(v.assisterNick ?? v.assistNick ?? v.assister ?? v.assist);
       const assist = pendingAssist ?? inlineAssist;
       pendingAssist = null;
@@ -480,6 +498,24 @@ export function formatLogItems(items: LogItem[]): LogLine[] {
   return out;
 }
 
+/** Compact tags for special kills: headshot / wallbang / smokebang / noscope. */
+function killFlags(v: Record<string, unknown>): string {
+  const tags: string[] = [];
+  if (v.headshot) {
+    tags.push('HS');
+  }
+  if (v.penetrated || v.wallbang) {
+    tags.push('WB');
+  }
+  if (v.throughSmoke || v.smokebang || v.thrusmoke) {
+    tags.push('SB');
+  }
+  if (v.noscope) {
+    tags.push('NS');
+  }
+  return tags.length ? ` (${tags.join('/')})` : '';
+}
+
 function killLine(killer: string, assist: string, weapon: string, hs: string, victim: string): string {
   return `${killer}${assist ? ` + ${assist}` : ''}${weapon ? ` [${weapon}]` : ''}${hs} ${victim}`;
 }
@@ -520,7 +556,7 @@ export function formatLogItem(item: LogItem): string {
         const killer = v.killerNick ?? v.killer ?? v.killerName;
         const victim = v.victimNick ?? v.victim ?? v.victimName;
         const weapon = v.weapon ?? v.weaponName;
-        const hs = v.headshot ? ' (HS)' : '';
+        const hs = killFlags(v);
         if (killer || victim) {
           return killLine(nick(killer) || '?', '', nick(weapon), hs, nick(victim) || '?');
         }

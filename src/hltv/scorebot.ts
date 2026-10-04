@@ -18,145 +18,29 @@ interface RawEvent {
  * Minimal Engine.IO v4 + Socket.IO client speaking the polling transport over
  * the browser engine (page-context fetch carries Cloudflare clearance).
  *
- * Wire protocol (observed on hltv.org, 2026-09):
+ * Wire protocol (observed on hltv.org):
  *   GET  /socket.io/?EIO=4&transport=polling&t=x      -> 0{"sid":...}
  *   POST /socket.io/?...&sid=<sid>  body "40"          -> 40{"sid":...}
  *   POST body 42["readyForScores","{\"token\":\"\",\"listIds\":[..]}"]
  *   POST body 42["readyForMatch","{\"token\":\"\",\"listId\":\"<id>\"}"]
  *   GET  long-poll -> engine.io packets (\x1e-separated); "2" means ping -> POST "3"
  */
-export class ScorebotClient {
-  public static debug = false;
-  private sid: string | null = null;
-  private running = false;
-  private generation = 0;
-  private scoreIds = new Set<number>();
-  private focusMatch: number | null = null;
-  private listeners = new Map<number, Set<ScorebotListener>>();
-  private latestScores = new Map<number, ScoreFrame>();
-  private recentLog: LogItem[] = [];
-  private freshSession = false;
 
-  public getLatestScore(matchId: number): ScoreFrame | undefined {
-    return this.latestScores.get(matchId);
-  }
+/** Shared packet plumbing for one socket.io polling session. */
+class PollingSession {
+  protected sid: string | null = null;
+  protected running = true;
+  protected generation = 0;
 
-  public getRecentLog(): LogItem[] {
-    return this.recentLog;
-  }
-
-  public subscribeScores(matchId: number, listener: ScorebotListener): void {
-    this.addListener(matchId, listener);
-    if (!this.scoreIds.has(matchId)) {
-      this.scoreIds.add(matchId);
-      this.reconnect(false);
-    }
-  }
-
-  public subscribeMatch(matchId: number, listener: ScorebotListener): void {
-    this.addListener(matchId, listener);
-    if (this.focusMatch !== matchId) {
-      this.focusMatch = matchId;
-      this.reconnect(false);
-    }
-    if (!this.scoreIds.has(matchId)) {
-      this.scoreIds.add(matchId);
-      this.reconnect(false);
-    }
-  }
-
-  public unsubscribe(matchId: number, listener: ScorebotListener): void {
-    const set = this.listeners.get(matchId);
-    if (!set) {
-      return;
-    }
-    set.delete(listener);
-    if (set.size === 0) {
-      this.listeners.delete(matchId);
-      if (this.scoreIds.has(matchId) && !this.hasLocalInterest(matchId)) {
-        this.scoreIds.delete(matchId);
-        if (this.focusMatch === matchId) {
-          this.focusMatch = null;
-        }
-        this.reconnect(false);
-      }
-    }
-  }
-
-  private hasLocalInterest(matchId: number): boolean {
-    return this.listeners.has(matchId);
-  }
-
-  private addListener(matchId: number, listener: ScorebotListener): void {
-    let set = this.listeners.get(matchId);
-    if (!set) {
-      set = new Set();
-      this.listeners.set(matchId, set);
-    }
-    set.add(listener);
-    this.ensureRunning();
-  }
-
-  private ensureRunning(): void {
-    if (!this.running) {
-      this.reconnect(true);
-    }
-  }
-
-  private reconnect(full: boolean): void {
-    if (full) {
-      this.running = true;
-      void this.loop(this.generation);
-    } else if (this.running && this.sid) {
-      // subscription set changed mid-session; send the new list on the live socket
-      void this.sendSubscriptions();
-    }
-  }
-
-  private async loop(gen: number): Promise<void> {
-    let backoff = 2000;
-    while (this.running && gen === this.generation) {
-      try {
-        if (!this.sid) {
-          await this.handshake();
-          await this.post('40');
-          await this.sendSubscriptions();
-          this.freshSession = true;
-        }
-        const body = await this.longPoll();
-        backoff = 2000;
-        if (ScorebotClient.debug) {
-          console.log(`[scorebot] poll: ${body.slice(0, 160)}`);
-        }
-        for (const packet of splitPackets(body)) {
-          await this.handlePacket(packet);
-        }
-      } catch (e) {
-        if (ScorebotClient.debug) {
-          console.log(`[scorebot] loop error: ${String(e).split('\n')[0]}`);
-        }
-        this.sid = null;
-        await sleep(backoff);
-        backoff = Math.min(backoff * 2, 30000);
-      }
-    }
-  }
-
-  private onConnected(): void {
-    // replay the freshest known scores to a brand-new listener set is not
-    // possible server-side; listeners read latestScores on attach instead.
-  }
-
-  private async handshake(): Promise<void> {
+  protected async handshake(): Promise<void> {
     const r = await engine.contextFetch(`${SCOREBOT_URL}/socket.io/?EIO=4&transport=polling&t=${Date.now()}`, undefined, 15000);
     if (r.status !== 200 || !r.body.startsWith('0')) {
       throw new Error(`scorebot handshake failed: ${r.status}`);
     }
-    const info = JSON.parse(r.body.slice(1)) as { sid: string };
-    this.sid = info.sid;
+    this.sid = (JSON.parse(r.body.slice(1)) as { sid: string }).sid;
   }
 
-  private async post(body: string): Promise<void> {
+  protected async post(body: string): Promise<void> {
     if (!this.sid) {
       throw new Error('scorebot not connected');
     }
@@ -170,11 +54,11 @@ export class ScorebotClient {
     }
   }
 
-  private async longPoll(): Promise<string> {
+  /** engine.io pings every ~25s, so a healthy long-poll returns within that window */
+  protected async longPoll(): Promise<string> {
     if (!this.sid) {
       throw new Error('scorebot not connected');
     }
-    // engine.io pings every ~25s, so a healthy long-poll returns within that window
     const r = await engine.contextFetch(
       `${SCOREBOT_URL}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${this.sid}`,
       undefined,
@@ -186,25 +70,166 @@ export class ScorebotClient {
     return r.body;
   }
 
-  private async sendSubscriptions(): Promise<void> {
-    if (!this.sid || (!this.scoreIds.size && this.focusMatch === null)) {
+  protected stop(): void {
+    this.running = false;
+    this.generation++;
+    this.sid = null;
+  }
+}
+
+/** Scores-only shared client: many match ids, no log stream (tree views). */
+class ScorebotClient extends PollingSession {
+  public static debug = false;
+  private scoreIds = new Set<number>();
+  private listeners = new Map<number, Set<ScorebotListener>>();
+  private latestScores = new Map<number, ScoreFrame>();
+
+  public getLatestScore(matchId: number): ScoreFrame | undefined {
+    return this.latestScores.get(matchId);
+  }
+
+  public subscribeScores(matchId: number, listener: ScorebotListener): void {
+    let set = this.listeners.get(matchId);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(matchId, set);
+    }
+    set.add(listener);
+    if (!this.scoreIds.has(matchId)) {
+      this.scoreIds.add(matchId);
+      this.resubscribe();
+    }
+    if (!this.running) {
+      this.running = true;
+      void this.loop(this.generation);
+    }
+  }
+
+  public unsubscribe(matchId: number, listener: ScorebotListener): void {
+    const set = this.listeners.get(matchId);
+    if (!set) {
       return;
     }
-    const ids = [...this.scoreIds];
-    if (ids.length) {
-      await this.post(`42["readyForScores","${escapeJson(JSON.stringify({ token: '', listIds: ids }))}"]`);
+    set.delete(listener);
+    if (set.size === 0) {
+      this.listeners.delete(matchId);
+      if (this.scoreIds.has(matchId)) {
+        this.scoreIds.delete(matchId);
+        this.resubscribe();
+      }
     }
-    if (this.focusMatch !== null) {
-      await this.post(`42["readyForMatch","${escapeJson(JSON.stringify({ token: '', listId: String(this.focusMatch) }))}"]`);
+  }
+
+  private resubscribe(): void {
+    if (this.sid) {
+      void this.post(`42["readyForScores","${escapeJson(JSON.stringify({ token: '', listIds: [...this.scoreIds] }))}"]`).catch(() => {
+        this.sid = null;
+      });
+    }
+  }
+
+  private async loop(gen: number): Promise<void> {
+    let backoff = 2000;
+    while (this.running && gen === this.generation) {
+      try {
+        if (!this.sid) {
+          await this.handshake();
+          await this.post('40');
+          await this.post(`42["readyForScores","${escapeJson(JSON.stringify({ token: '', listIds: [...this.scoreIds] }))}"]`);
+        }
+        const body = await this.longPoll();
+        backoff = 2000;
+        for (const packet of splitPackets(body)) {
+          await this.handlePacket(packet);
+        }
+      } catch {
+        this.sid = null;
+        await sleep(backoff);
+        backoff = Math.min(backoff * 2, 30000);
+      }
     }
   }
 
   private async handlePacket(packet: string): Promise<void> {
     if (packet === '2') {
-      await this.post('3');
+      await this.post('3').catch(() => undefined);
       return;
     }
-    if (packet.startsWith('40') || packet.startsWith('0')) {
+    if (!packet.startsWith('42')) {
+      return;
+    }
+    const ev = parseSocketIoEvent(packet);
+    if (ev?.name === 'score') {
+      const frame = ev.payload as ScoreFrame;
+      if (typeof frame?.listId !== 'number') {
+        return;
+      }
+      this.latestScores.set(frame.listId, frame);
+      for (const l of this.listeners.get(frame.listId) ?? []) {
+        l.onScore?.(frame);
+      }
+    }
+  }
+}
+
+/**
+ * Dedicated session per open match detail page: its own socket, subscribed to
+ * exactly one match (readyForScores + readyForMatch). Log and player-state
+ * events therefore cannot leak between simultaneously open match pages.
+ */
+export class ScorebotMatchSession extends PollingSession {
+  private listener: ScorebotListener;
+  private freshSession = false;
+  private recentLog: LogItem[] = [];
+
+  public constructor(private matchId: number, listener: ScorebotListener) {
+    super();
+    this.listener = listener;
+    void this.loop(this.generation);
+  }
+
+  /** Backlog received so far (used when the panel needs a re-render). */
+  public getRecentLog(): LogItem[] {
+    return this.recentLog;
+  }
+
+  public close(): void {
+    this.stop();
+  }
+
+  private async loop(gen: number): Promise<void> {
+    let backoff = 2000;
+    while (this.running && gen === this.generation) {
+      try {
+        if (!this.sid) {
+          await this.handshake();
+          await this.post('40');
+          const payload = escapeJson(JSON.stringify({ token: '', listIds: [this.matchId] }));
+          await this.post(`42["readyForScores","${payload}"]`);
+          const focus = escapeJson(JSON.stringify({ token: '', listId: String(this.matchId) }));
+          await this.post(`42["readyForMatch","${focus}"]`);
+          this.freshSession = true;
+        }
+        const body = await this.longPoll();
+        let backoffReset = false;
+        for (const packet of splitPackets(body)) {
+          await this.handlePacket(packet);
+          backoffReset = true;
+        }
+        if (backoffReset) {
+          backoff = 2000;
+        }
+      } catch {
+        this.sid = null;
+        await sleep(backoff);
+        backoff = Math.min(backoff * 2, 30000);
+      }
+    }
+  }
+
+  private async handlePacket(packet: string): Promise<void> {
+    if (packet === '2') {
+      await this.post('3').catch(() => undefined);
       return;
     }
     if (!packet.startsWith('42')) {
@@ -216,12 +241,8 @@ export class ScorebotClient {
     }
     if (ev.name === 'score') {
       const frame = ev.payload as ScoreFrame;
-      if (typeof frame?.listId !== 'number') {
-        return;
-      }
-      this.latestScores.set(frame.listId, frame);
-      for (const l of this.listeners.get(frame.listId) ?? []) {
-        l.onScore?.(frame);
+      if (typeof frame?.listId === 'number' && frame.listId === this.matchId) {
+        this.listener.onScore?.(frame);
       }
       return;
     }
@@ -231,37 +252,19 @@ export class ScorebotClient {
       if (!Array.isArray(items)) {
         return;
       }
-      // A fresh session replays the full history — signal a reset so the UI
-      // replaces its log view instead of duplicating it.
       const reset = this.freshSession;
       this.freshSession = false;
-      this.recentLog = items.slice(-200);
-      if (this.focusMatch !== null) {
-        for (const l of this.listeners.get(this.focusMatch) ?? []) {
-          l.onLog?.(items, reset);
-        }
-      }
+      this.recentLog = items.slice(-400);
+      this.listener.onLog?.(items, reset);
       return;
     }
-    // Player-level live state (TERRORIST/CT arrays) arrives on other event
-    // names; forward anything shaped like a match state to the focused match.
-    if (this.focusMatch !== null && ev.payload && typeof ev.payload === 'object') {
+    // player-level live state (TERRORIST/CT arrays) — belongs to our match
+    if (ev.payload && typeof ev.payload === 'object') {
       const p = ev.payload as Record<string, unknown>;
       if ('TERRORIST' in p || 'CT' in p || 'ctTeamName' in p) {
-        for (const l of this.listeners.get(this.focusMatch) ?? []) {
-          l.onPlayerState?.(p);
-        }
+        this.listener.onPlayerState?.(p);
       }
     }
-  }
-
-  public shutdown(): void {
-    this.running = false;
-    this.generation++;
-    this.sid = null;
-    this.listeners.clear();
-    this.scoreIds.clear();
-    this.focusMatch = null;
   }
 }
 

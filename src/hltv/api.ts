@@ -123,9 +123,41 @@ export function getNews(): Promise<NewsItem[]> {
     parseNewsList(await html('/')));
 }
 
+/** Extract the page's stylesheet URLs for native news rendering. */
+export function extractCssUrls(pageHtml: string): string[] {
+  const urls: string[] = [];
+  const re = /<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(pageHtml))) {
+    const href = m[1];
+    urls.push(href.startsWith('http') ? href : BASE + href);
+  }
+  return urls;
+}
+
+const cssCache = new TtlCache<string>(Number.POSITIVE_INFINITY);
+
+/** Fetch and cache HLTV's stylesheet bundle (one fetch per session). */
+export function getSiteCss(urls: string[]): Promise<string> {
+  return cssCache.wrap(urls.join('|'), async () => {
+    const sheets: string[] = [];
+    for (const u of urls.slice(0, 3)) {
+      const css = await engine.getText(u).catch(() => '');
+      if (css) {
+        sheets.push(css);
+      }
+    }
+    return sheets.join('\n');
+  });
+}
+
 export function getNewsDetail(path: string): Promise<NewsDetail> {
-  return caches.newsDetail.wrap(path, async () =>
-    parseNewsArticle(await html(path), path));
+  return caches.newsDetail.wrap(path, async () => {
+    const raw = await html(path);
+    const detail = parseNewsArticle(raw, path);
+    detail.cssUrls = extractCssUrls(raw);
+    return detail;
+  });
 }
 
 

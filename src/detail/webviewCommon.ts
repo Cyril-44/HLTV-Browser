@@ -20,7 +20,7 @@ export function shellHtml(title: string, body: string, cspSource: string, pageUr
 <html lang="${htmlLang()}">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline'; frame-src https:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; font-src https: data:; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline'; frame-src https:;">
 <title>${escapeHtml(title)}</title>
 <style>
   body {
@@ -85,6 +85,10 @@ export function shellHtml(title: string, body: string, cspSource: string, pageUr
   a { color: var(--vscode-textLink-foreground); }
 .matchline { font-size: 1.05em; margin: 0.2em 0; }
   .matchcard { border: 1px solid var(--vscode-panel-border); padding: 8px 14px; margin: 0.8em 0; }
+  /* Native HLTV rendering: site CSS scoped to this container, chrome removed */
+  .hltv-native { background: transparent; }
+  .hltv-native .standard-box { background: transparent; border: none; box-shadow: none; }
+  .hltv-native .text-ellipsis, .hltv-native .newstext-con { max-width: none; }
   .score-big { font-family: var(--vscode-editor-font-family); font-size: 1.6em; font-weight: 600; }
   hr { border: 0; border-top: 1px solid var(--vscode-panel-border); margin: 1.5em 0; }
 </style>

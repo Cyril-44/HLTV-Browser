@@ -245,6 +245,10 @@ export interface NewsDetail {
   author: string;
   date: number | null;
   intro: string;
+  /** Sanitized original article body (native rendering path). */
+  bodyHtml: string;
+  /** Stylesheet URLs used by the source page (native rendering path). */
+  cssUrls: string[];
   blocks: NewsBlock[];
   fragments: NewsFragment[];
   teams: NewsTeamMention[];

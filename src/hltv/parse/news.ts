@@ -92,7 +92,19 @@ export function parseNewsArticle(html: string, url: string): NewsDetail {
     collectComments($, forum, 0, comments);
   }
 
-  return { url, title, author, date, intro, blocks, fragments, teams, comments };
+  return {
+    url,
+    title,
+    author,
+    date,
+    intro,
+    bodyHtml: sanitizeNativeBody($, article as unknown as cheerio.Cheerio<never>),
+    cssUrls: [],
+    blocks,
+    fragments,
+    teams,
+    comments,
+  };
 }
 
 type AnyNode = { tagName?: string };
@@ -368,6 +380,49 @@ function normalizeSegments(segments: NewsSegment[]): void {
     const last = segments[segments.length - 1];
     last.text = last.text.replace(/\s+$/, '');
   }
+}
+
+/**
+ * Build a sanitized copy of the original article body for native rendering
+ * with HLTV's own CSS: strip scripts/ads/hover-cards, neutralize media into
+ * opt-in placeholders, and tag links for in-app routing.
+ */
+function sanitizeNativeBody($: CheerioAPI, article: cheerio.Cheerio<never>): string {
+  const src = article.find('.newsdsl').first();
+  if (!src.length) {
+    return '';
+  }
+  const root = $('<div></div>').append(src.html() ?? '');
+  // scripts, styles, ads, mobile-only navigation, hover cards
+  root.find('script, style, ins, .tooltip-con, [data-ddzyhtbikk], .BZ4Bl4KkTN, .fragments-overview-button-wrapper, .fragments-overview-wrapper').remove();
+  // media opt-in: images → placeholder slots (existing global toggle drives them)
+  root.find('img').each((_, img) => {
+    const $img = $(img);
+    const srcUrl = $img.attr('src') ?? '';
+    if (!srcUrl) {
+      $img.remove();
+      return;
+    }
+    const slot = $(`<span class="media-slot" data-kind="image" data-src="${srcUrl.replace(/"/g, '&quot;')}"><span class="placeholder">[IMG]</span></span>`);
+    $img.replaceWith(slot);
+  });
+  // iframes (Spotify/Twitch/…) → opt-in embeds
+  root.find('iframe').each((_, frame) => {
+    const $f = $(frame);
+    const srcUrl = $f.attr('src') ?? '';
+    if (!srcUrl) {
+      $f.remove();
+      return;
+    }
+    const slot = $(`<span class="media-slot" data-kind="embed" data-src="${srcUrl.replace(/"/g, '&quot;')}" data-provider="embed"><span class="placeholder">[EMBED]</span></span>`);
+    $f.replaceWith(slot);
+  });
+  // tag links for delegated routing; drop inline styles (page-chrome leftovers)
+  root.find('a').each((_, a) => {
+    $(a).addClass('natlink').removeAttr('style target');
+  });
+  root.find('[style]').removeAttr('style');
+  return root.html() ?? '';
 }
 
 function providerFromUrl(url: string): string {

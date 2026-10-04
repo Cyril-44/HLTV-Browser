@@ -71,6 +71,48 @@ class HltvEngine {
     return this.serialize(() => this.navigate(url));
   }
 
+  /** Fetch a plain-text resource (e.g. a stylesheet) through the browser,
+   *  using the same human-like context and challenge ladder as page loads. */
+  public async getText(url: string): Promise<string> {
+    return this.serialize(async () => {
+      const browser = await this.ensureLaunch();
+      try {
+        if (!this.userAgent) {
+          this.userAgent = UA_FALLBACK;
+        }
+        const context = await browser.newContext({
+          userAgent: this.userAgent,
+          viewport: { width: 1440, height: 1200 },
+          locale: 'en-US',
+          timezoneId: this.localTimezone(),
+          ignoreHTTPSErrors: true,
+        });
+        if (this.clearanceCookies.length) {
+          await context.addCookies(this.clearanceCookies).catch(() => undefined);
+        }
+        await context.addInitScript(() => {
+          Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        });
+        const page = await context.newPage();
+        await page.setExtraHTTPHeaders(MASTER_HEADERS);
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => undefined);
+        let text = '';
+        for (let i = 0; i < 8; i++) {
+          const body = (await page.evaluate('document.body.innerText').catch(() => '')) as string;
+          if (body && !body.includes('Just a moment') && !body.includes('security verification')) {
+            text = String(body);
+            break;
+          }
+          await page.waitForTimeout(2000).catch(() => undefined);
+        }
+        await context.close().catch(() => undefined);
+        return text;
+      } finally {
+        await browser.close().catch(() => undefined);
+      }
+    });
+  }
+
   /**
    * Fetch a URL from a page parked on the www.hltv.org origin. Scorebot
    * (scorebot-lb.hltv.org) shares the .hltv.org cf_clearance cookie, so

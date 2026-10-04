@@ -48,6 +48,8 @@ const en: Record<string, string> = {
   'match.alive': 'Alive',
   'match.dead': 'Dead',
   'match.stateCol': 'State',
+  'match.weaponCol': 'Weapon',
+  'match.roundHistory': 'Rounds',
   // event detail page
   'event.loadingPage': 'Loading event page…',
   'event.formats': 'Formats',
@@ -135,6 +137,8 @@ const zh: Record<string, string> = {
   'match.alive': '存活',
   'match.dead': '阵亡',
   'match.stateCol': '状态',
+  'match.weaponCol': '武器',
+  'match.roundHistory': '回合',
   // event detail page
   'event.loadingPage': '正在加载赛事页面…',
   'event.formats': '赛制',
