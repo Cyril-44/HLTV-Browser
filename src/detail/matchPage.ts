@@ -355,12 +355,33 @@ function roundLetter(x) {
   return 'K'; // elimination win
 }
 var sbDebugSent = false;
+// Scoreboard history arrives as incremental payloads: deep into the second
+// half they OMIT firstHalf (and pre-overtime they omit overtime). Accumulate
+// per-side across payloads, keeping the longest half arrays. Within a map the
+// second half only ever GROWS — a shrinking secondHalf means a new map (or a
+// map restart), where we reset instead of merging stale rounds.
+var histStore = { ct: null, t: null };
+function mergedHist(stored, inc) {
+  var f = inc && inc.firstHalf || [], s = inc && inc.secondHalf || [], o = inc && inc.overtime || [];
+  if (!stored) return { firstHalf: f, secondHalf: s, overtime: o };
+  var sF = stored.firstHalf || [], sS = stored.secondHalf || [], sO = stored.overtime || [];
+  if (s.length < sS.length) {
+    return { firstHalf: f, secondHalf: s, overtime: o }; // new map / restart
+  }
+  return {
+    firstHalf: f.length >= sF.length ? f : sF,
+    secondHalf: s.length >= sS.length ? s : sS,
+    overtime: o.length >= sO.length ? o : sO,
+  };
+}
 function renderRoundHistory(s) {
   var el = document.getElementById('roundHistory');
   if (!el) return;
-  var pick = function (h) { return (h && ((h.firstHalf || []).concat(h.secondHalf || []))) || []; };
-  var ct = pick(s.ctMatchHistory);
-  var t = pick(s.terroristMatchHistory);
+  histStore.ct = mergedHist(histStore.ct, s.ctMatchHistory);
+  histStore.t = mergedHist(histStore.t, s.terroristMatchHistory);
+  var pick = function (h) { return (h.firstHalf || []).concat(h.secondHalf || [], h.overtime || []); };
+  var ct = pick(histStore.ct);
+  var t = pick(histStore.t);
   if (!ct.length && !t.length) { el.textContent = ''; return; }
   var n = Math.max(ct.length, t.length);
   if (!n) { el.textContent = ''; return; }
