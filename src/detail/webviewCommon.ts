@@ -81,6 +81,19 @@ export function shellHtml(title: string, body: string, cspSource: string, pageUr
   .ptable tbody tr:nth-child(even) td { background: var(--vscode-list-hoverBackground); }
   .p-dead td { color: var(--vscode-descriptionForeground); }
   .p-alive td:first-child { color: var(--vscode-charts-green, var(--vscode-foreground)); }
+  /* live scoreboard: single fixed-layout table keeps both team blocks aligned */
+  .ptable-fixed { table-layout: fixed; }
+  .ptable-fixed td.nw { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ptable-fixed tr.team-head td { border-top: 1px solid var(--vscode-panel-border); padding-top: 6px; color: var(--vscode-foreground); }
+  .ptable-fixed tr.team-head:first-child td { border-top: none; }
+  /* round history: two-row strip, one row per team, site-style icons */
+  .rhist { border-collapse: collapse; table-layout: fixed; margin: 0.35em 0 0.5em; }
+  .rhist th.rh-team { width: 130px; text-align: right; padding: 1px 8px 1px 0; font-weight: 400; font-size: 0.85em; color: var(--vscode-descriptionForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rhist td { width: 17px; height: 17px; padding: 1px; text-align: center; vertical-align: middle; }
+  .rhist td.rh-win { color: #fff; background: var(--vscode-charts-green); border-radius: 2px; }
+  .rhist td.rh-win svg { display: inline-block; vertical-align: middle; }
+  .rhist td.rh-plain { color: var(--vscode-foreground); }
+  .rhist td.rh-lost { background: var(--vscode-descriptionForeground); opacity: 0.25; border-radius: 2px; }
   #roundClock { font-family: var(--vscode-editor-font-family); }
   a { color: var(--vscode-textLink-foreground); }
 .matchline { font-size: 1.05em; margin: 0.2em 0; }

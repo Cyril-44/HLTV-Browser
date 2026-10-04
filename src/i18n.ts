@@ -49,6 +49,7 @@ const en: Record<string, string> = {
   'match.dead': 'Dead',
   'match.stateCol': 'State',
   'match.weaponCol': 'Weapon',
+  'match.playerCol': 'Player',
   'match.roundHistory': 'Rounds',
   // event detail page
   'event.loadingPage': 'Loading event page…',
@@ -139,6 +140,7 @@ const zh: Record<string, string> = {
   'match.dead': '阵亡',
   'match.stateCol': '状态',
   'match.weaponCol': '武器',
+  'match.playerCol': '选手',
   'match.roundHistory': '回合',
   // event detail page
   'event.loadingPage': '正在加载赛事页面…',
@@ -209,6 +211,7 @@ export function webviewStrings(): Record<string, string> {
   return {
     noSideData: t('match.noSideData'),
     alive: t('match.alive'),
+    playerCol: t('match.playerCol'),
     dead: t('match.dead'),
     stateCol: t('match.stateCol'),
     loadMedia: t('news.loadMedia'),

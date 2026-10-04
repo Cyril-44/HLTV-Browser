@@ -34,6 +34,17 @@ class MatchDetailPage {
       const bombPlanted = items.some((i) => 'BombPlanted' in i);
       const roundEnded = items.some((i) => 'RoundEnd' in i);
       const roundStarted = items.some((i) => /roundstart/i.test(String(Object.keys(i)[0] ?? '')));
+      if (reset) {
+        // backlog diagnostic: if old-round RoundEnd separators are missing on
+        // the page, this line shows exactly which event types the scorebot
+        // replay actually delivered (find it in the Extension Host log)
+        const hist = new Map<string, number>();
+        for (const it of items) {
+          const k = Object.keys(it)[0] ?? '?';
+          hist.set(k, (hist.get(k) ?? 0) + 1);
+        }
+        console.log(`[hltv] scorebot backlog (${items.length}): ${JSON.stringify([...hist.entries()])}`);
+      }
       void this.panel.webview.postMessage({
         type: 'log',
         lines: formatLogItems(items),
@@ -53,7 +64,12 @@ class MatchDetailPage {
       this.session?.close();
       this.session = null;
     });
-    panel.webview.onDidReceiveMessage((msg: { type: string; url?: string }) => {
+    panel.webview.onDidReceiveMessage((msg: { type: string; url?: string; sample?: string }) => {
+      if (msg.type === 'sbDebug' && msg.sample) {
+        // one-shot scoreboard payload sample (player object / round history
+        // shapes) — pins the exact scorebot field names from a live match
+        console.log(`[hltv] scoreboard sample: ${msg.sample}`);
+      }
       if (msg.type === 'openLink' && msg.url) {
         void vscode.env.openExternal(vscode.Uri.parse('https://www.hltv.org' + msg.url));
       }
@@ -307,26 +323,59 @@ function prependLog(lines, reset, bombPlanted, roundEnded, roundStarted) {
   }
 }
 
-// Round-win symbols (the site shows icons: scissors/head/fire/…)
-var ROUND_SYM = { bomb: '\u70B8', explosion: '\u70B8', defuse: '\u62C6', defused: '\u62C6', elimination: '\u706D', eliminate: '\u706D', time: '\u65F6', timeout: '\u65F6', win: '\u80DC', clutch: '\u7A81' };
-function roundSym(x) {
-  if (x == null) return '\u00B7';
-  if (typeof x === 'object') x = x.winType || x.type || x.method || '';
-  var k = String(x).toLowerCase();
-  if (ROUND_SYM[k]) return ROUND_SYM[k];
-  var hit = Object.keys(ROUND_SYM).find(function (key) { return k.indexOf(key) >= 0; });
-  return hit ? ROUND_SYM[hit] : k.charAt(0).toUpperCase();
+// ---- round history: two-row table like the site, one row per team, with
+// site-style mini icons (bomb / cutters / skull / clock) ----
+function iconSvg(k) {
+  var body = {
+    bomb: '<circle cx="6.5" cy="8.5" r="4"/><path d="M9 5.5L11.5 3M11.5 3l1.6.5M11.5 3l-.4-1.6"/>',
+    defuse: '<path d="M4 11l7-8M11 11l-7-8"/><circle cx="3" cy="11.5" r="1.7"/><circle cx="11" cy="11.5" r="1.7"/>',
+    elimination: '<path d="M7 2.2a4.6 4.6 0 00-4.6 4.6c0 1.8 1 3.3 2.4 4V13h4.4v-2.2c1.4-.7 2.4-2.2 2.4-4A4.6 4.6 0 007 2.2z"/><path d="M5.2 6.4h.1M8.8 6.4h.01"/>',
+    time: '<circle cx="7" cy="7" r="5.2"/><path d="M7 4v3.2l2.2 1.5"/>'
+  }[k] || '<path d="M7 2.6l1.3 2.8 3 .4-2.2 2.1.5 3-2.6-1.4-2.6 1.4.5-3L2.7 5.8l3-.4z"/>';
+  return '<svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
 }
+var ICON_KEYS = [['bomb', ['bomb', 'explosion']], ['defuse', ['defuse', 'defused', 'cut']], ['elimination', ['elimination', 'eliminate', 'kill']], ['time', ['time', 'timeout']]];
+function iconFor(k) {
+  var s = String(k || '').toLowerCase();
+  for (var i = 0; i < ICON_KEYS.length; i++) {
+    for (var j = 0; j < ICON_KEYS[i][1].length; j++) {
+      if (s.indexOf(ICON_KEYS[i][1][j]) >= 0) return ICON_KEYS[i][0];
+    }
+  }
+  return '';
+}
+function roundEntryType(x) {
+  if (x == null) return '';
+  if (typeof x === 'object') x = x.winType || x.type || x.method || x.won || '';
+  return String(x);
+}
+function roundCell(entry) {
+  var t = roundEntryType(entry).toLowerCase();
+  var iconKey = iconFor(t);
+  if (!t || t === 'loss' || t === 'lost' || t === 'lose' || t === 'false' || t === '0' || t === 'none') {
+    return '<td class="rh-lost"><span></span></td>';
+  }
+  return '<td class="rh-win' + (iconKey ? '' : ' rh-plain') + '">' + (iconKey ? iconSvg(iconKey) : '·') + '</td>';
+}
+var sbDebugSent = false;
 function renderRoundHistory(s) {
   var el = document.getElementById('roundHistory');
   if (!el) return;
-  var hist = s.ctMatchHistory || s.terroristMatchHistory;
-  if (!hist) { el.textContent = ''; return; }
   var pick = function (h) { return (h && ((h.firstHalf || []).concat(h.secondHalf || []))) || []; };
   var ct = pick(s.ctMatchHistory);
   var t = pick(s.terroristMatchHistory);
   if (!ct.length && !t.length) { el.textContent = ''; return; }
-  el.innerHTML = '<span class="muted">' + esc(STR.roundLabel) + '</span> CT: <strong>' + ct.map(roundSym).join('') + '</strong> · T: <strong>' + t.map(roundSym).join('') + '</strong>';
+  var n = Math.max(ct.length, t.length);
+  var r1 = '', r2 = '';
+  for (var i = 0; i < n; i++) { r1 += roundCell(ct[i]); r2 += roundCell(t[i]); }
+  el.innerHTML = '<div class="muted" style="font-size:0.85em">' + esc(STR.roundLabel) + '</div>' +
+    '<table class="rhist"><tr><th class="rh-team">' + esc(s.ctTeamName || 'CT') + '</th>' + r1 + '</tr>' +
+    '<tr><th class="rh-team">' + esc(s.terroristTeamName || 'T') + '</th>' + r2 + '</tr></table>';
+  if (!sbDebugSent) {
+    sbDebugSent = true;
+    var api = (typeof vsApi === 'function') ? vsApi() : null;
+    if (api) api.postMessage({ type: 'sbDebug', sample: JSON.stringify({ ctHist: s.ctMatchHistory, tHist: s.terroristMatchHistory }).slice(0, 900) });
+  }
 }
 function renderScoreboard(s) {
   const area = document.getElementById('playerTable');
@@ -338,20 +387,39 @@ function renderScoreboard(s) {
     setClock(s.bombPlanted ? Math.min(s.roundTimeRemainingMS, 40000) : s.roundTimeRemainingMS);
   }
   renderRoundHistory(s);
-  let html = '';
+  // ONE table for both teams: a shared colgroup keeps the two team blocks'
+  // columns pixel-aligned (two separate tables drift with content width).
+  let html = '<table class="ptable ptable-fixed"><colgroup>' +
+    '<col style="width:19%"><col style="width:9%"><col style="width:26%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:11%"><col style="width:14%">' +
+    '</colgroup>';
   const sides = [['TERRORIST', s.terroristTeamName || 'T'], ['CT', s.ctTeamName || 'CT']];
+  let sbSampleSent = false;
   for (const [side, label] of sides) {
     const rows = s[side];
     if (!Array.isArray(rows) || !rows.length) continue;
-    html += '<table class="ptable"><tr><th>' + esc(label) + '</th><th>$</th><th>' + STR.weaponCol + '</th><th>K</th><th>A</th><th>D</th><th>ADR</th><th>' + STR.stateCol + '</th></tr>';
+    html += '<tr class="team-head"><td colspan="7"><strong>' + esc(label) + '</strong></td><td class="num">' + (rows.filter(p => p.alive).length + '/' + rows.length) + '</td></tr>';
+    html += '<tr><th>' + STR.playerCol + '</th><th>$</th><th>' + STR.weaponCol + '</th><th>K</th><th>A</th><th>D</th><th>ADR</th><th>' + STR.stateCol + '</th></tr>';
     for (const p of rows) {
+      if (!sbSampleSent) {
+        sbSampleSent = true;
+        const api = (typeof vsApi === 'function') ? vsApi() : null;
+        if (api) api.postMessage({ type: 'sbDebug', sample: JSON.stringify(p).slice(0, 600) });
+      }
       const adr = p.damagePrRound != null ? (typeof p.damagePrRound === 'number' ? p.damagePrRound.toFixed(1) : p.damagePrRound) : '-';
       const weapon = p.weapon || p.weaponName || p.activeWeapon || '-';
-      html += '<tr class="p-row ' + (p.alive ? 'p-alive' : 'p-dead') + '"><td>' + esc(p.name || p.nick || '') + '</td><td class="num">' + (p.money ?? '-') + '</td><td class="num">' + esc(String(weapon)) + '</td><td class="num">' + (p.score ?? '-') + '</td><td class="num">' + (p.assists ?? '-') + '</td><td class="num">' + (p.deaths ?? '-') + '</td><td class="num">' + adr + '</td><td class="num">' + (p.alive ? STR.alive : STR.dead) + '</td></tr>';
+      // armor/helmet/defuse kit as glyph suffixes; exact field names vary by
+      // scorebot build — sbDebug dump above lets us pin them from a live match
+      const armor = p.armor ?? p.armorValue ?? p.armorPoints;
+      const helm = p.helmet ?? p.hasHelmet;
+      const kit = p.defuseKit ?? p.hasDefuseKit ?? p.defusekit;
+      let gear = String(weapon);
+      if (typeof armor === 'number' && armor > 0) gear += ' \u2691' + armor;
+      if (helm) gear += ' +H';
+      if (kit) gear += ' +K';
+      html += '<tr class="p-row ' + (p.alive ? 'p-alive' : 'p-dead') + '"><td>' + esc(p.name || p.nick || '') + '</td><td class="num">' + (p.money ?? '-') + '</td><td class="nw">' + esc(gear) + '</td><td class="num">' + (p.score ?? '-') + '</td><td class="num">' + (p.assists ?? '-') + '</td><td class="num">' + (p.deaths ?? '-') + '</td><td class="num">' + adr + '</td><td class="num">' + (p.alive ? STR.alive : STR.dead) + '</td></tr>';
     }
-    html += '</table>';
   }
-  if (html) area.innerHTML = html;
+  if (html) { html += '</table>'; area.innerHTML = html; }
 }
 document.querySelectorAll('.matchlink').forEach(a => a.addEventListener('click', e => {
   e.preventDefault(); vsApi().postMessage({ type: 'openMatch', url: a.dataset.url });
