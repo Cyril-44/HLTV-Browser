@@ -81,10 +81,20 @@ body:not(.media-on) .hltv-native .newsitem-match-result-score{color:var(--text-c
 /* flag watermarks: the slot span carries the original classes, img fills it */
 .hltv-native .newsitem-match-result-team-flag-left img,
 .hltv-native .newsitem-match-result-team-flag-right img{height:100%;width:auto;max-width:none;display:block}
+/* stats-table header crest: site sizes the element (16px) via this class —
+   the recreated img must fill the slot span, not render at natural size */
+.hltv-native .newsitem-match-stats-logo img{height:100%;width:auto;max-width:none;display:inline-block;vertical-align:middle}
 .hltv-native .videoCon{margin:1em 0}
 .hltv-native .videoWrapper{height:auto!important;padding-bottom:0!important;min-height:0!important;background:none!important}
+/* filled slots become inline-block: the site's sizing classes (e.g. the
+   16px stats crest) were written for the <img> itself and only apply to a
+   non-inline box; the recreated img fills the sized slot instead of
+   rendering at natural size */
+.hltv-native .media-slot.filled{display:inline-block}
+.hltv-native .media-slot[data-kind="embed"].filled{display:block}
 .hltv-native .media-slot.filled iframe{display:block;width:100%;aspect-ratio:16/9;height:auto;border:0}
-.hltv-native .media-slot.filled img{display:block;max-width:100%;height:auto}</style>`,
+.hltv-native .media-slot.filled img{display:inline-block;max-width:100%;height:auto;vertical-align:middle}
+.hltv-native .media-slot.filled.newsitem-match-stats-logo img{height:100%;width:auto;max-width:none}</style>`,
   );
   // `newsdsl` scope is required: HLTV scopes every embedded news widget
   // (.newsitem-match-result etc.) under `.newsdsl .…`; without this ancestor

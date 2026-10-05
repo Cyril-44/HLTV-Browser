@@ -32,7 +32,7 @@ class EventDetailPage {
         openEventDetail(msg.url);
       }
       if (msg.type === 'openLink' && msg.url) {
-        void vscode.env.openExternal(vscode.Uri.parse('https://www.hltv.org' + msg.url));
+        void vscode.env.openExternal(vscode.Uri.parse(msg.url.startsWith('http') ? msg.url : 'https://www.hltv.org' + msg.url));
       }
       if (msg.type === 'refreshPage') {
         api.clearDetailCache(this.url);

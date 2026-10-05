@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.13 — 2026-10-04
+
+### Fixed
+- **比赛/赛事页 ↗ 外链双重前缀**（`https://www.hltv.org/https//www.hltv.org/…`）：工具栏发的是完整 URL，而 matchPage/eventPage 的 openLink 处理器无条件再拼一次站点前缀 —— 现与其它页一致按 `http` 开头判断
+- **新闻 stats 表头队徽不缩放**：官网把 `height:16px` 写在 `<img>` 自身（`.newsitem-match-stats-logo`），媒体占位 span 接管类名后 inline 元素不吃 height，加载出的队徽按原始尺寸撑爆表头 —— filled 占位改为 `inline-block`（站点尺寸类恢复生效），队徽 img 以更高特异性规则填充占位（离线验证 60px 队徽正确收敛为 16px 并垂直居中）
+
 ## 1.3.12 — 2026-10-04
 
 ### Fixed

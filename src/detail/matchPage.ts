@@ -80,7 +80,7 @@ class MatchDetailPage {
         console.log(`[hltv] scoreboard sample: ${msg.sample}`);
       }
       if (msg.type === 'openLink' && msg.url) {
-        void vscode.env.openExternal(vscode.Uri.parse('https://www.hltv.org' + msg.url));
+        void vscode.env.openExternal(vscode.Uri.parse(msg.url.startsWith('http') ? msg.url : 'https://www.hltv.org' + msg.url));
       }
       if (msg.type === 'openMatch' && msg.url) {
         openMatchDetail(msg.url);
