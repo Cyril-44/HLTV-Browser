@@ -17,7 +17,34 @@ const CSS_CACHE = '/tmp/hltv-site.css';
 async function main(): Promise<void> {
   const argIdx = process.argv.findIndex((a) => a.startsWith('/news/'));
   const url = argIdx >= 0 ? process.argv[argIdx] : '/news/45631/falcons-sweep-aurora-to-stay-flawless-at-epl';
-  const d = await api.getNewsDetail(url);
+  let d: Awaited<ReturnType<typeof api.getNewsDetail>>;
+  try {
+    d = await api.getNewsDetail(url);
+    if (!d.bodyHtml) {
+      throw new Error('empty bodyHtml (challenged?)');
+    }
+  } catch (e) {
+    // engine CF-challenged: fall back to the passing persistent profile
+    const { chromium } = await import('playwright-core');
+    const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.8010.47 Safari/537.36';
+    const ctx = await chromium.launchPersistentContext('/tmp/cf-solve-profile', {
+      headless: true,
+      executablePath: '/home/cyril/chrome/linux-153.0.8010.47/chrome-linux64/chrome',
+      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+      userAgent: UA,
+      viewport: { width: 1440, height: 1200 },
+    });
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    console.log(`engine path failed (${String(e).split('\n')[0]}); fetching via cf profile…`);
+    await page.goto('https://www.hltv.org' + url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(2500);
+    const html = await page.content();
+    const cssLinks = await page.evaluate(() => [...document.querySelectorAll('link[rel="stylesheet"]')].map((l) => l.getAttribute('href') ?? ''));
+    await ctx.close();
+    const { parseNewsArticle } = await import('../src/hltv/parse/news');
+    d = parseNewsArticle(html, url);
+    (d as { cssUrls: string[] }).cssUrls = cssLinks;
+  }
   console.log(`article: ${d.title} | bodyHtml=${d.bodyHtml.length}B | cssUrls=${d.cssUrls.length}`);
   // disk cache the 2.6MB stylesheet so render iterations don't re-hit HLTV
   let css: string;
@@ -25,7 +52,24 @@ async function main(): Promise<void> {
     css = readFileSync(CSS_CACHE, 'utf-8');
     console.log(`css: ${css.length}B (disk cache)`);
   } else {
-    css = await api.getSiteCss(d.cssUrls);
+    css = await api.getSiteCss(d.cssUrls).catch(() => '');
+    if (css.length < 100000) {
+      // engine challenged — pull the stylesheet through the passing profile
+      const { chromium } = await import('playwright-core');
+      const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.8010.47 Safari/537.36';
+      const ctx = await chromium.launchPersistentContext('/tmp/cf-solve-profile', {
+        headless: true,
+        executablePath: '/home/cyril/chrome/linux-153.0.8010.47/chrome-linux64/chrome',
+        args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+        userAgent: UA,
+        viewport: { width: 1440, height: 1200 },
+      });
+      const page = ctx.pages()[0] ?? (await ctx.newPage());
+      const href = d.cssUrls.find((u) => u.includes('everything') || u.includes('all')) ?? d.cssUrls[0];
+      await page.goto(href.startsWith('http') ? href : 'https://www.hltv.org' + href, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => undefined);
+      css = await page.evaluate(() => document.body?.innerText ?? '').catch(() => '');
+      await ctx.close();
+    }
     writeFileSync(CSS_CACHE, css);
     console.log(`css: ${css.length}B (fetched, cached)`);
   }

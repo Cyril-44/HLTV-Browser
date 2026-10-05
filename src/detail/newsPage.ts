@@ -63,7 +63,9 @@ export function buildNativeNewsHtml(
   parts.push(
     `<style>${vscodeVars}
 html,body{background:var(--vscode-editor-background)!important;background-image:none!important}
-body{overflow-x:hidden}
+/* the inlined site css loads after the shell styles and overrides the
+   shell's body margins — re-assert the centered column with !important */
+body{max-width:1028px!important;margin:0 auto!important;overflow-x:hidden}
 .hltv-native .text-ellipsis,.hltv-native .newstext-con{max-width:none}
 .hltv-native a{cursor:pointer}
 body:not(.media-on) .hltv-native img{display:none}
