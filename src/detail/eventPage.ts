@@ -48,11 +48,9 @@ class EventDetailPage {
           for (const u of [...new Set(msg.urls!)]) {
             const file = await media.getMediaImage(u).catch(() => null);
             if (file) {
-              void this.panel.webview.postMessage({
-                type: 'mediaReady',
-                url: u,
-                uri: this.panel.webview.asWebviewUri(vscode.Uri.file(file)).toString(),
-              });
+              // svg results are data URIs already — pass them through as-is
+              const uri = file.startsWith('data:') ? file : this.panel.webview.asWebviewUri(vscode.Uri.file(file)).toString();
+              void this.panel.webview.postMessage({ type: 'mediaReady', url: u, uri });
             }
             await new Promise((r) => setTimeout(r, 150));
           }
@@ -202,13 +200,14 @@ document.querySelectorAll('.eventlink').forEach(a => a.addEventListener('click',
 }));
 // rendered bracket / swiss blocks: click opens the match page in-editor;
 // hover shows the teams (and scores when present) so slots read fine even
-// with logos off. Bracket names live in .team-name spans; swiss names ride
-// on the logo slots' title attributes.
+// with logos off. Names are taken PER TEAM CONTAINER (.team / .swiss-visual-
+// team): bracket logos come in day/night pairs sharing one title, so a flat
+// [title] scan would read the same team twice ("VITALITY vs VITALITY").
 document.querySelectorAll('.bracket-match').forEach(m => {
-  let names = [...m.querySelectorAll('.team-name')].map(n => n.textContent.trim());
-  if (names.length < 2) {
-    names = [...m.querySelectorAll('.media-slot[title]')].map(s => s.getAttribute('title') ?? '').filter(Boolean);
-  }
+  const containers = m.querySelectorAll('.team, .swiss-visual-team');
+  const names = [...containers]
+    .map((c) => (c.querySelector('.team-name')?.textContent.trim() || c.querySelector('[title]')?.getAttribute('title') || '').trim())
+    .filter(Boolean);
   if (names.length >= 2) {
     const results = [...m.querySelectorAll('.result')].map(r => r.textContent.trim());
     if (results.length >= 2) {

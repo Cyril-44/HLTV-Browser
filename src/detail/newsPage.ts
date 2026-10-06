@@ -253,11 +253,9 @@ class NewsDetailPage {
             const file = await media.getMediaImage(u).catch(() => null);
             if (file) {
               ok++;
-              void this.panel.webview.postMessage({
-                type: 'mediaReady',
-                url: u,
-                uri: this.panel.webview.asWebviewUri(vscode.Uri.file(file)).toString(),
-              });
+              // svg results are data URIs already — pass them through as-is
+              const uri = file.startsWith('data:') ? file : this.panel.webview.asWebviewUri(vscode.Uri.file(file)).toString();
+              void this.panel.webview.postMessage({ type: 'mediaReady', url: u, uri });
             } else {
               fail++;
             }

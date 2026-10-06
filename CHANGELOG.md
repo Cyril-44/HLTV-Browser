@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.18 — 2026-10-07
+
+### Fixed
+- **悬停出现 `VITALITY vs VITALITY` 重复队名**：淘汰赛图标有 day/night 两份变体（同 title），平铺扫描把同一队读了两遍 —— 悬停取名改为**按队伍容器**（`.team` / `.swiss-visual-team`，每容器只取一个名字），两种结构通吃
+- **部分瑞士轮队徽（如 MOUZ）加载不出**：这些是 SVG 队徽（EPL 页 82/417 个），webview 资源服务不以图片类型下发本地 `.svg` 导致 `<img>` 拒渲染 —— SVG 一律以 `data:image/svg+xml;base64` 直传（抓取层实测 200/image\/svg+xml 正常，渲染验证 22x22 命中站点槽位尺寸）
+
 ## 1.3.17 — 2026-10-07
 
 ### Fixed

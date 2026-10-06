@@ -39,6 +39,15 @@ export async function getMediaImage(url: string): Promise<string | null> {
   if (memory.has(url)) {
     return memory.get(url)!;
   }
+  // SVGs are returned as data URIs: the webview resource server does not
+  // serve local .svg files with an image content-type, so <img> refuses to
+  // render them. Data URIs bypass the server and CSP allows data: in img-src.
+  if (/\.svg(\?|$)/i.test(url)) {
+    const b64 = await engine.fetchImageBase64(url).catch(() => null);
+    const result = b64 ? `data:image/svg+xml;base64,${b64}` : null;
+    memory.set(url, result);
+    return result;
+  }
   const file = cachedFileFor(url);
   let result: string | null = null;
   if (existsSync(file)) {
