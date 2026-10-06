@@ -69,8 +69,8 @@ class HltvEngine {
     return env ? { server: env } : undefined;
   }
 
-  public async getHtml(url: string): Promise<string> {
-    return this.serialize(() => this.navigate(url));
+  public async getHtml(url: string, expandBrackets = false): Promise<string> {
+    return this.serialize(() => this.navigate(url, expandBrackets));
   }
 
   /** Fetch a plain-text resource (e.g. a stylesheet) through the browser,
@@ -222,20 +222,20 @@ class HltvEngine {
     return run;
   }
 
-  private async navigate(url: string): Promise<string> {
+  private async navigate(url: string, expandBrackets = false): Promise<string> {
     await this.throttle();
     // Two fresh-browser attempts, then let the user clear an interactive
     // challenge, then a final attempt with the fresh clearance.
     for (let i = 0; i < 2; i++) {
       try {
-        return await this.freshNavigate(url);
+        return await this.freshNavigate(url, expandBrackets);
       } catch {
         // fall through to the next fresh attempt
       }
     }
     const solved = await this.solveChallengeManually(url);
     if (solved) {
-      return this.freshNavigate(url);
+      return this.freshNavigate(url, expandBrackets);
     }
     throw new Error(`Cloudflare challenge did not clear for ${url}`);
   }
@@ -250,7 +250,7 @@ class HltvEngine {
     this.lastNavigation = Date.now();
   }
 
-  private async freshNavigate(url: string): Promise<string> {
+  private async freshNavigate(url: string, expandBrackets = false): Promise<string> {
     const browser = await this.ensureLaunch();
     try {
       if (!this.userAgent) {
@@ -279,6 +279,9 @@ class HltvEngine {
           // in use) so later contexts — especially the scorebot origin page —
           // start already cleared.
           this.clearanceCookies = await context.cookies().catch(() => this.clearanceCookies);
+          if (expandBrackets) {
+            await this.expandBrackets(page);
+          }
           await page.waitForTimeout(500).catch(() => undefined);
           return await page.content();
         }
@@ -287,6 +290,24 @@ class HltvEngine {
       throw new Error(`Cloudflare challenge did not clear for ${url}`);
     } finally {
       await browser.close().catch(() => undefined);
+    }
+  }
+
+  /**
+   * Event pages lazy-render collapsed brackets (playoffs often ships as a
+   * collapsed placeholder until clicked); expand every collapsed bracket so
+   * the captured DOM carries the rendered matchups.
+   */
+  private async expandBrackets(page: Page): Promise<void> {
+    for (let round = 0; round < 4; round++) {
+      const collapsed = await page.$$('.slotted-bracket-header.collapsed').catch(() => []);
+      if (!collapsed.length) {
+        return;
+      }
+      for (const header of collapsed) {
+        await header.click({ timeout: 3000 }).catch(() => undefined);
+      }
+      await page.waitForTimeout(1500).catch(() => undefined);
     }
   }
 

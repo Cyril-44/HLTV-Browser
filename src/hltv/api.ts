@@ -54,9 +54,9 @@ export function clearAllCaches(): void {
   caches.newsDetail.clear();
 }
 
-async function html(path: string): Promise<string> {
+async function html(path: string, expandBrackets = false): Promise<string> {
   const url = path.startsWith('http') ? path : BASE + path;
-  return engine.getHtml(url);
+  return engine.getHtml(url, expandBrackets);
 }
 
 export function getMatches(): Promise<Match[]> {
@@ -115,7 +115,7 @@ export function getMatchDetail(path: string): Promise<MatchDetail> {
 
 export function getEventDetail(path: string): Promise<EventDetail> {
   return caches.eventDetail.wrap(path, async () =>
-    parseEventPage(await html(path), path));
+    parseEventPage(await html(path, true), path));
 }
 
 export function getNews(): Promise<NewsItem[]> {
