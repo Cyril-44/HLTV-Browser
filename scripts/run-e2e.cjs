@@ -12,6 +12,8 @@ const Module = require('module');
 
 const vscodeStub = {
   window: {
+    activeColorTheme: { kind: 2 },
+    onDidChangeActiveColorTheme: () => ({ dispose() {} }),
     showErrorMessage: async () => undefined,
     showInformationMessage: async () => undefined,
     showWarningMessage: async () => undefined,

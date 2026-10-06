@@ -49,9 +49,10 @@ export class EventsView implements vscode.TreeDataProvider<EventNode | MatchNode
           api.getEventMatches(element.event.id),
           api.getEventResults(element.event.id).catch(() => [] as ResultMatch[]),
         ]);
-        const children: (MatchNode | ResultNode | vscode.TreeItem)[] = sortMatches(matches).map(
-          (m) => new MatchNode(m, (n) => this._onDidChangeTreeData.fire(n)),
-        );
+        const isPlaceholder = (name: string): boolean => !name || /^tbd$/i.test(name.trim());
+        const children: (MatchNode | ResultNode | vscode.TreeItem)[] = sortMatches(
+          matches.filter((m) => !(isPlaceholder(m.team1.name) && isPlaceholder(m.team2.name))),
+        ).map((m) => new MatchNode(m, (n) => this._onDidChangeTreeData.fire(n)));
         for (const r of results) {
           children.push(new ResultNode(r, (n) => this._onDidChangeTreeData.fire(n)));
         }

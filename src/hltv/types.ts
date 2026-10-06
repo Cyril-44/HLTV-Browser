@@ -97,6 +97,12 @@ export interface EventDetail {
   brackets: BracketSection[];
   swiss: { title: string; matchups: string[] }[];
   relatedEvents: { name: string; url: string }[];
+  /** Rendered bracket DOM (sanitized) for native display, '' when absent. */
+  bracketHtml: string;
+  /** Rendered swiss-round section DOM (sanitized), '' when absent. */
+  swissHtml: string;
+  /** Stylesheet URLs of the source page (native rendering path). */
+  cssUrls: string[];
 }
 
 export interface MapBlock {

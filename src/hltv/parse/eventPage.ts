@@ -61,6 +61,7 @@ export function parseEventPage(html: string, url: string): EventDetail {
   }
 
   const brackets: BracketSection[] = [];
+  const bracketHtmlParts: string[] = [];
   for (const ph of $('[data-slotted-bracket-json]')) {
     const $ph = $(ph);
     let raw: string;
@@ -77,9 +78,44 @@ export function parseEventPage(html: string, url: string): EventDetail {
     } catch {
       continue;
     }
+    // native path: keep the RENDERED bracket DOM (the site renders the
+    // component into this wrapper); the JSON cards stay as fallback. The
+    // rendered slots carry no links — inject them by pairing each rendered
+    // .match with the JSON matchup holding the same team names.
+    const clone = $ph.clone();
+    const urlByName = collectMatchUrlsByName(json);
+    if (Object.keys(urlByName).length) {
+      clone.find('.match').each((_, m) => {
+        const $m = $(m);
+        const names = $m
+          .find('.team-name')
+          .map((_, n) => $(n).text().trim())
+          .get()
+          .filter(Boolean)
+          .sort();
+        if (names.length < 2) {
+          return;
+        }
+        const url = urlByName[`${names[0]}|${names[1]}`];
+        if (url) {
+          $m.attr('data-url', url).addClass('bracket-match');
+        }
+      });
+    }
+    bracketHtmlParts.push(sanitizeEventDom($, clone));
     const sectionTitle = $ph.prevAll('.section-header').first().find('span').text().trim() || json.name || 'Bracket';
     brackets.push({ title: sectionTitle, rounds: extractRounds(json) });
   }
+
+  // swiss rounds: the whole visual container renders natively (CSS is scoped
+  // under .swiss-visual-container); text cards stay as fallback
+  const swissContainer = $('.swiss-visual-container').first();
+  const swissHtml = swissContainer.length ? sanitizeEventDom($, swissContainer.clone()) : '';
+
+  const cssUrls = $('link[rel="stylesheet"]')
+    .map((_, l) => $(l).attr('href') ?? '')
+    .get()
+    .filter((h) => /\.css(\?|$)/.test(h));
 
   const relatedEvents: { name: string; url: string }[] = [];
   for (const a of $('.related-event a[href*="/events/"], .related-events a[href*="/events/"]')) {
@@ -107,9 +143,9 @@ export function parseEventPage(html: string, url: string): EventDetail {
       const score = $mu.find('[class*="score"]').first().text().replace(/\s+/g, ' ').trim();
       if (teams.length === 2) {
         matchups.push(teams.join(' vs ') + (score ? ` ${score}` : ''));
-      } else {
-        matchups.push('TBD vs TBD');
       }
+      // unannounced matchups (placeholder "?") are simply skipped — a wall
+      // of "TBD vs TBD" lines carries no information
     }
     if (title || matchups.length) {
       swiss.push({ title, matchups });
@@ -129,7 +165,65 @@ export function parseEventPage(html: string, url: string): EventDetail {
     brackets,
     swiss,
     relatedEvents,
+    bracketHtml: bracketHtmlParts.join('\n'),
+    swissHtml,
+    cssUrls,
   };
+}
+
+/** team-name-pair → match page url, from the bracket JSON (both orders). */
+function collectMatchUrlsByName(json: RawBracket): Record<string, string> {
+  const out: Record<string, string> = {};
+  const visit = (obj: unknown): void => {
+    if (!obj || typeof obj !== 'object') {
+      return;
+    }
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      if (/^slot/.test(key) && value && typeof value === 'object') {
+        const mu = (value as { matchup?: RawMatchup }).matchup;
+        const url = mu?.match?.matchPageURL;
+        const a = mu?.team1?.name?.trim();
+        const b = mu?.team2?.name?.trim();
+        if (url && a && b && a !== 'TBD' && b !== 'TBD') {
+          const [x, y] = [a, b].sort();
+          out[`${x}|${y}`] = url;
+        }
+      } else {
+        visit(value);
+      }
+    }
+  };
+  visit(json);
+  return out;
+}
+
+/**
+ * Sanitize a rendered event section (bracket / swiss rounds) for native
+ * webview display. Unlike the news sanitizer we KEEP inline styles — the
+ * bracket layout (tier heights, round offsets) is driven by them. Team logos
+ * become opt-in media slots (original classes kept so site sizing applies)
+ * and links are tagged for in-editor routing.
+ */
+function sanitizeEventDom($: cheerio.CheerioAPI, root: ReturnType<cheerio.CheerioAPI>): string {
+  root.find('script, style, ins, .tooltip-con').remove();
+  root.removeAttr('data-slotted-bracket-json');
+  root.find('img').each((_, img) => {
+    const $img = $(img);
+    const raw = $img.attr('src') ?? '';
+    if (!raw) {
+      $img.remove();
+      return;
+    }
+    const srcUrl = raw.startsWith('/') ? `https://www.hltv.org${raw}` : raw;
+    const keptClass = ($img.attr('class') ?? '').replace(/["'<>]/g, '');
+    const slot = $(`<span class="media-slot ${keptClass}" data-kind="image" data-src="${srcUrl.replace(/"/g, '&quot;')}"></span>`);
+    $img.replaceWith(slot);
+  });
+  root.find('a').each((_, a) => {
+    $(a).addClass('natlink');
+  });
+  // outer html of the wrapper itself — its class/inline style drive layout
+  return $('<div></div>').append(root).html() ?? '';
 }
 
 function extractRounds(json: RawBracket): { name: string; matchups: BracketMatchup[] }[] {

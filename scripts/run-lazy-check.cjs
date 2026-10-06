@@ -63,7 +63,9 @@ const fakeBrowser = {
 };
 
 const vscodeStub = {
+  ColorThemeKind: { Light: 1, HighContrastLight: 2, Dark: 3, HighContrast: 4 },
   window: {
+    activeColorTheme: { kind: 2 },
     registerTreeDataProvider: () => ({ dispose() {} }),
     createWebviewPanel: () => ({
       webview: { onDidReceiveMessage() {}, postMessage: async () => true, cspSource: 'https://test' },
