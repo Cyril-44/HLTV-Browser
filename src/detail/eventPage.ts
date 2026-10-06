@@ -128,7 +128,14 @@ body:not(.logos-on) .hltv-native img{display:none}
 .hltv-native .media-slot.filled{display:inline-block}
 .hltv-native .media-slot.filled img{display:inline-block;max-width:100%;height:auto;vertical-align:middle}
 .hltv-native a{cursor:pointer}
-.hltv-native .bracket-match{cursor:pointer}</style>`,
+.hltv-native .bracket-match{cursor:pointer}
+/* bracket slot logos: the site sizes the CONTAINER (16px flex box) and
+   lets the img fill it via max-100%; our slot span must bridge the two —
+   fill the container box, img fills the span with object-fit */
+.hltv-native .slot-team-image-container .media-slot{height:100%;width:100%}
+.hltv-native .slot-team-image-container .media-slot img{height:100%;width:100%;object-fit:contain;display:block}
+.teamgrid .media-slot.logo-slot img{height:20px;width:auto;vertical-align:middle}
+.teamgrid .media-slot.logo-slot{display:inline-block;vertical-align:middle}</style>`,
       );
       parts.push(`<div class="hltv-native ${themeClass}">${d.bracketHtml}${d.swissHtml}</div><hr/>`);
     } else {
@@ -193,6 +200,19 @@ document.querySelectorAll('.matchlink').forEach(a => a.addEventListener('click',
 document.querySelectorAll('.eventlink').forEach(a => a.addEventListener('click', e => {
   e.preventDefault(); vsApi().postMessage({ type: 'openEvent', url: a.dataset.url });
 }));
+// rendered bracket blocks: click opens the match page in-editor; hover
+// shows "TeamA X - Y TeamB" so the slot is readable even with logos off
+document.querySelectorAll('.bracket-match').forEach(m => {
+  const names = [...m.querySelectorAll('.team-name')].map(n => n.textContent.trim());
+  const results = [...m.querySelectorAll('.result')].map(r => r.textContent.trim());
+  if (names.length === 2) {
+    m.title = names[0] + ' ' + (results[0] ?? '') + ' - ' + (results[1] ?? '') + ' ' + names[1];
+  }
+  m.addEventListener('click', e => {
+    e.preventDefault();
+    if (m.dataset.url) vsApi().postMessage({ type: 'openMatch', url: m.dataset.url });
+  });
+});
 // native bracket/swiss links: match pages open in-editor, everything else external
 document.querySelectorAll('.natlink').forEach(a => a.addEventListener('click', e => {
   e.preventDefault();
