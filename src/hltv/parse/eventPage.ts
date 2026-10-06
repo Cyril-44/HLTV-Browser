@@ -102,7 +102,11 @@ export function parseEventPage(html: string, url: string): EventDetail {
         }
       });
     }
-    bracketHtmlParts.push(sanitizeEventDom($, clone));
+    // a placeholder without rendered matchups (playoffs not drawn yet — e.g.
+    // during the swiss stage) renders as an empty gray strip: skip it
+    if (clone.find('.match, .team-name').length) {
+      bracketHtmlParts.push(sanitizeEventDom($, clone));
+    }
     const sectionTitle = $ph.prevAll('.section-header').first().find('span').text().trim() || json.name || 'Bracket';
     brackets.push({ title: sectionTitle, rounds: extractRounds(json) });
   }
@@ -110,7 +114,22 @@ export function parseEventPage(html: string, url: string): EventDetail {
   // swiss rounds: the whole visual container renders natively (CSS is scoped
   // under .swiss-visual-container); text cards stay as fallback
   const swissContainer = $('.swiss-visual-container').first();
-  const swissHtml = swissContainer.length ? sanitizeEventDom($, swissContainer.clone()) : '';
+  let swissHtml = '';
+  if (swissContainer.length) {
+    const swissClone = swissContainer.clone();
+    // swiss matchups carry no links — each has data-match-details-popup-json
+    // with a matchId; expose it as a clickable block (openMatch normalizes
+    // the slug away, so a placeholder slug is fine)
+    swissClone.find('.swiss-visual-matchup').each((_, mu) => {
+      const $mu = $(mu);
+      const popup = $mu.attr('data-match-details-popup-json') ?? '';
+      const id = /"matchId"\s*:\s*\{?"?matchId"?\s*:\s*"?(\d+)/.exec(popup)?.[1];
+      if (id) {
+        $mu.attr('data-url', `/matches/${id}/matchup`).addClass('bracket-match');
+      }
+    });
+    swissHtml = sanitizeEventDom($, swissClone);
+  }
 
   const cssUrls = $('link[rel="stylesheet"]')
     .map((_, l) => $(l).attr('href') ?? '')
@@ -216,7 +235,13 @@ function sanitizeEventDom($: cheerio.CheerioAPI, root: ReturnType<cheerio.Cheeri
     }
     const srcUrl = raw.startsWith('/') ? `https://www.hltv.org${raw}` : raw;
     const keptClass = ($img.attr('class') ?? '').replace(/["'<>]/g, '');
-    const slot = $(`<span class="media-slot ${keptClass}" data-kind="image" data-src="${srcUrl.replace(/"/g, '&quot;')}"></span>`);
+    // keep the title: swiss team names live on the logo img's title attr and
+    // the hover tooltip reads them from the slot
+    const title = ($img.attr('title') ?? '').replace(/["<>]/g, '');
+    const titleAttr = title ? ` title="${title}"` : '';
+    const slot = $(
+      `<span class="media-slot ${keptClass}"${titleAttr} data-kind="image" data-src="${srcUrl.replace(/"/g, '&quot;')}"></span>`,
+    );
     $img.replaceWith(slot);
   });
   root.find('a').each((_, a) => {

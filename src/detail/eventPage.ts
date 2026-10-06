@@ -200,13 +200,22 @@ document.querySelectorAll('.matchlink').forEach(a => a.addEventListener('click',
 document.querySelectorAll('.eventlink').forEach(a => a.addEventListener('click', e => {
   e.preventDefault(); vsApi().postMessage({ type: 'openEvent', url: a.dataset.url });
 }));
-// rendered bracket blocks: click opens the match page in-editor; hover
-// shows "TeamA X - Y TeamB" so the slot is readable even with logos off
+// rendered bracket / swiss blocks: click opens the match page in-editor;
+// hover shows the teams (and scores when present) so slots read fine even
+// with logos off. Bracket names live in .team-name spans; swiss names ride
+// on the logo slots' title attributes.
 document.querySelectorAll('.bracket-match').forEach(m => {
-  const names = [...m.querySelectorAll('.team-name')].map(n => n.textContent.trim());
-  const results = [...m.querySelectorAll('.result')].map(r => r.textContent.trim());
-  if (names.length === 2) {
-    m.title = names[0] + ' ' + (results[0] ?? '') + ' - ' + (results[1] ?? '') + ' ' + names[1];
+  let names = [...m.querySelectorAll('.team-name')].map(n => n.textContent.trim());
+  if (names.length < 2) {
+    names = [...m.querySelectorAll('.media-slot[title]')].map(s => s.getAttribute('title') ?? '').filter(Boolean);
+  }
+  if (names.length >= 2) {
+    const results = [...m.querySelectorAll('.result')].map(r => r.textContent.trim());
+    if (results.length >= 2) {
+      m.title = names[0] + ' ' + (results[0] ?? '') + ' - ' + (results[1] ?? '') + ' ' + names[1];
+    } else {
+      m.title = names[0] + ' vs ' + names[1];
+    }
   }
   m.addEventListener('click', e => {
     e.preventDefault();
